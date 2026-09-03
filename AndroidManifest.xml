@@ -36,6 +36,7 @@
             android:name=".TrackingService"
             android:enabled="true"
             android:exported="false"
+            android:stopWithTask="true"
             android:foregroundServiceType="location" />
     </application>
 </manifest>

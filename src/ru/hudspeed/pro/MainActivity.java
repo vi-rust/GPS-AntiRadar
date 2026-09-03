@@ -497,6 +497,10 @@ public final class MainActivity extends Activity {
                 ru.gpsantiradar.app.R.drawable.ic_key, "Сменить ключ MapKit");
         content.addView(mapKey, new LinearLayout.LayoutParams(-1, dp(54)));
 
+        final LinearLayout exit = menuAction(
+                ru.gpsantiradar.app.R.drawable.ic_exit, "\u0412\u044b\u0439\u0442\u0438");
+        content.addView(exit, new LinearLayout.LayoutParams(-1, dp(54)));
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
@@ -518,8 +522,19 @@ public final class MainActivity extends Activity {
                 showMapKeyDialog();
             }
         });
+        exit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dialog.dismiss();
+                exitApplication();
+            }
+        });
         dialog.show();
         styleRoundedDialog(dialog);
+    }
+
+    private void exitApplication() {
+        stopService(new Intent(this, TrackingService.class));
+        finishAndRemoveTask();
     }
 
     private LinearLayout menuAction(int iconResource, String label) {
