@@ -17,16 +17,37 @@ public final class CarRadarBaseUpdateNotifierTest {
         List<RadarBaseUpdateState> shown = new ArrayList<>();
         CarRadarBaseUpdateNotifier notifier =
                 new CarRadarBaseUpdateNotifier(source, shown::add);
+        RadarBaseUpdateState started = state(
+                1, RadarBaseUpdateState.Status.STARTED, "Начато");
+        source.latest = started;
 
         notifier.start();
         notifier.start();
 
         assertTrue(source.replayLatest);
         assertEquals(1, source.addCount);
-        RadarBaseUpdateState started = state(
-                1, RadarBaseUpdateState.Status.STARTED, "Начато");
-        source.emit(started);
         assertEquals(Arrays.asList(started), shown);
+    }
+
+    @Test public void startDoesNotReplayTerminalStateFromAnOlderSession() {
+        FakeSource source = new FakeSource();
+        List<RadarBaseUpdateState> shown = new ArrayList<>();
+        RadarBaseUpdateState stale = state(
+                8, RadarBaseUpdateState.Status.SUCCESS, "Старый результат");
+        source.latest = stale;
+        CarRadarBaseUpdateNotifier notifier =
+                new CarRadarBaseUpdateNotifier(source, shown::add);
+
+        notifier.start();
+
+        assertTrue(shown.isEmpty());
+        RadarBaseUpdateState started = state(
+                9, RadarBaseUpdateState.Status.STARTED, "Новое обновление");
+        RadarBaseUpdateState success = state(
+                10, RadarBaseUpdateState.Status.SUCCESS, "Новый результат");
+        source.emit(started);
+        source.emit(success);
+        assertEquals(Arrays.asList(started, success), shown);
     }
 
     @Test public void showsOnlyUserVisibleStatesWhileSessionIsActive() {
@@ -70,6 +91,12 @@ public final class CarRadarBaseUpdateNotifierTest {
         int addCount;
         int removeCount;
         boolean replayLatest;
+        RadarBaseUpdateState latest = state(
+                0, RadarBaseUpdateState.Status.IDLE, "");
+
+        @Override public RadarBaseUpdateState latestState() {
+            return latest;
+        }
 
         @Override public void addListener(
                 RadarBaseUpdater.Listener listener, boolean replayLatest) {
@@ -77,6 +104,7 @@ public final class CarRadarBaseUpdateNotifierTest {
             lastListener = listener;
             this.replayLatest = replayLatest;
             addCount++;
+            if (replayLatest) listener.onRadarBaseUpdate(latest);
         }
 
         @Override public void removeListener(RadarBaseUpdater.Listener listener) {
@@ -90,6 +118,7 @@ public final class CarRadarBaseUpdateNotifierTest {
         }
 
         void emit(RadarBaseUpdateState state) {
+            latest = state;
             if (listener != null) listener.onRadarBaseUpdate(state);
         }
 

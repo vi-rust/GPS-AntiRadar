@@ -2,6 +2,7 @@ package ru.gpsantiradar.app;
 
 final class CarRadarBaseUpdateNotifier {
     interface Source {
+        RadarBaseUpdateState latestState();
         void addListener(RadarBaseUpdater.Listener listener, boolean replayLatest);
         void removeListener(RadarBaseUpdater.Listener listener);
     }
@@ -13,12 +14,17 @@ final class CarRadarBaseUpdateNotifier {
     private final Source source;
     private final MessageSink messageSink;
     private boolean started;
+    private long terminalSequenceAtStart = Long.MIN_VALUE;
 
     private final RadarBaseUpdater.Listener listener =
             new RadarBaseUpdater.Listener() {
                 @Override public void onRadarBaseUpdate(RadarBaseUpdateState state) {
                     if (started && state != null
                             && state.status != RadarBaseUpdateState.Status.IDLE) {
+                        if (state.isTerminal()
+                                && state.sequence <= terminalSequenceAtStart) {
+                            return;
+                        }
                         messageSink.show(state);
                     }
                 }
@@ -39,6 +45,9 @@ final class CarRadarBaseUpdateNotifier {
 
     void start() {
         if (started) return;
+        RadarBaseUpdateState latest = source.latestState();
+        terminalSequenceAtStart = latest != null && latest.isTerminal()
+                ? latest.sequence : Long.MIN_VALUE;
         started = true;
         source.addListener(listener, true);
     }
@@ -57,6 +66,10 @@ final class CarRadarBaseUpdateNotifier {
                 throw new IllegalArgumentException("updater is required");
             }
             this.updater = updater;
+        }
+
+        @Override public RadarBaseUpdateState latestState() {
+            return updater.latestState();
         }
 
         @Override public void addListener(
