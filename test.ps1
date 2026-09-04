@@ -20,6 +20,7 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\SpeedControlRules.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\StrelkaAlertAlgorithm.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\StrelkaAlertTracker.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\RadarScanGate.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\ReleaseHistory.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\ProcessLaunchGuard.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\CameraMarkerDiff.java") `
@@ -34,3 +35,4 @@ if ([string]::IsNullOrWhiteSpace($RadarBaseFile)) {
     & (Join-Path $JavaHome "bin\java.exe") -cp "$Build;$LocalGson" ru.gpsantiradar.app.ParserGeoTest $RadarBaseFile
 }
 if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
+& (Join-Path $Project "tests\AndroidSourceContractTest.ps1") -Project $Project

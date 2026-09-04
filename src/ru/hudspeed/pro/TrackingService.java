@@ -20,6 +20,7 @@ import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -48,7 +49,7 @@ public final class TrackingService extends Service implements LocationListener {
     private Location lastRadarScan;
     private float radarHeading = Float.NaN;
     private final StrelkaAlertTracker alertTracker = new StrelkaAlertTracker();
-    private long lastRadarFixElapsed;
+    private final RadarScanGate radarScanGate = new RadarScanGate();
     private long alertedCameraId = -1;
     private boolean finalWarning;
     private long alertedRoadObjectId = -1;
@@ -106,6 +107,7 @@ public final class TrackingService extends Service implements LocationListener {
         double roadWarningDistance = Double.MAX_VALUE;
         double roadWarningProgress = Double.MAX_VALUE;
         List<CameraPoint> candidates = database.nearby(location.getLatitude(), location.getLongitude(), 5000);
+        if (candidates == null) return;
         for (CameraPoint object : candidates) {
             double distance = Geo.distanceMeters(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
@@ -208,26 +210,22 @@ public final class TrackingService extends Service implements LocationListener {
         double movementSinceScan = lastRadarScan == null ? Double.MAX_VALUE
                 : Geo.distanceMeters(lastRadarScan.getLatitude(), lastRadarScan.getLongitude(),
                 location.getLatitude(), location.getLongitude());
-        float requiredMovement = location.hasAccuracy()
-                ? Math.max(3f, location.getAccuracy()) : 3f;
-        boolean scanPerformed = requiredMovement < 60f
-                && movementSinceScan > requiredMovement;
-        if (scanPerformed && lastRadarScan != null) {
+        long now = SystemClock.elapsedRealtime();
+        RadarScanGate.Decision scanDecision = radarScanGate.assess(now,
+                location.hasAccuracy(), location.getAccuracy(), movementSinceScan);
+        float proposedRadarHeading = radarHeading;
+        if (scanDecision.scanRequested && lastRadarScan != null) {
             float measuredHeading = Geo.bearing(lastRadarScan.getLatitude(),
                     lastRadarScan.getLongitude(), location.getLatitude(),
                     location.getLongitude());
-            radarHeading = Float.isNaN(radarHeading) ? measuredHeading
+            proposedRadarHeading = Float.isNaN(radarHeading) ? measuredHeading
                     : averageHeading(radarHeading, measuredHeading);
-            heading = radarHeading;
+            heading = proposedRadarHeading;
         } else if (!Float.isNaN(radarHeading)) {
             heading = radarHeading;
         }
         int fallbackAlertDistance = getSharedPreferences("settings", MODE_PRIVATE)
                 .getInt("alert_distance", 800);
-        long now = SystemClock.elapsedRealtime();
-        boolean gpsRecovered = lastRadarFixElapsed > 0
-                && now - lastRadarFixElapsed > 5000L;
-        lastRadarFixElapsed = now;
         CameraPoint nearest = null;
         double nearestDistance = Double.MAX_VALUE;
         int nearestAlertDistance = 0;
@@ -235,6 +233,9 @@ public final class TrackingService extends Service implements LocationListener {
         List<StrelkaAlertTracker.Observation> observations = new ArrayList<>();
         List<CameraPoint> candidates = database.nearby(location.getLatitude(),
                 location.getLongitude(), StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS);
+        boolean candidatesUnavailable = candidates == null;
+        boolean scanPerformed = scanDecision.scanRequested && !candidatesUnavailable;
+        if (candidates == null) candidates = Collections.emptyList();
         for (CameraPoint object : candidates) {
             double distance = Geo.distanceMeters(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
@@ -263,10 +264,19 @@ public final class TrackingService extends Service implements LocationListener {
 
         StrelkaAlertTracker.Update alertUpdate;
         if (scanPerformed) {
-            alertUpdate = alertTracker.update(observations, speedKmh, gpsRecovered);
+            alertUpdate = alertTracker.update(
+                    observations, speedKmh, scanDecision.gpsRecovered);
+            radarScanGate.accept(scanDecision);
+            if (lastRadarScan != null) radarHeading = proposedRadarHeading;
             lastRadarScan = new Location(location);
         } else {
             alertUpdate = alertTracker.snapshot();
+        }
+        if (candidatesUnavailable && alertUpdate.closestTracking != null) {
+            StrelkaAlertTracker.State tracked = alertUpdate.closestTracking;
+            nearest = tracked.object;
+            nearestDistance = tracked.distanceMeters;
+            nearestAlertDistance = tracked.activationDistance;
         }
         CameraPoint finishedObject = null;
         for (StrelkaAlertTracker.State exited : alertUpdate.exited) {
@@ -310,14 +320,15 @@ public final class TrackingService extends Service implements LocationListener {
             return "Вход подтверждён: голос · " + pending.distanceMeters + " м";
         }
         StrelkaAlertTracker.State closest = update.closestActive;
+        StrelkaAlertTracker.State overspeed = update.overspeedCandidate(speedKmh);
+        if (overspeed != null) {
+            boolean signaled = scanPerformed
+                    && soundPlayer.beepIfIdle(overspeed.distanceMeters);
+            return "В зоне: " + overspeed.distanceMeters + " м · превышение +"
+                    + StrelkaAlertAlgorithm.OVERSPEED_THRESHOLD_KMH + " · "
+                    + (signaled ? "сигнал" : "ожидание сигнала");
+        }
         if (closest != null && closest.spoken) {
-            if (StrelkaAlertAlgorithm.isOverspeeding(closest.object, speedKmh)) {
-                boolean signaled = scanPerformed
-                        && soundPlayer.beepIfIdle(closest.distanceMeters);
-                return "В зоне: " + closest.distanceMeters + " м · превышение +"
-                        + StrelkaAlertAlgorithm.OVERSPEED_THRESHOLD_KMH + " · "
-                        + (signaled ? "сигнал" : "ожидание сигнала");
-            }
             return "В зоне: " + closest.distanceMeters + " м · без превышения";
         }
         StrelkaAlertTracker.State tracking = update.closestTracking;

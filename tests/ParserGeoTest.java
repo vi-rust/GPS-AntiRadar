@@ -131,6 +131,8 @@ public final class ParserGeoTest {
                 "rear-control zone ends at reverse distance");
 
         verifyStrelkaAlertLifecycle();
+        verifyMultiObjectOverspeedSelection();
+        verifyRadarScanRecoveryGate();
         verifyKnownReleaseHistory();
         verifyProcessLaunchGuard();
         verifyCameraMarkerDiff();
@@ -197,6 +199,107 @@ public final class ParserGeoTest {
                 observation(object, 450, true, false)), 72, false);
         check(update.pendingVoice != null,
                 "new confirmed approach after exit repeats the voice alert");
+    }
+
+    private static void verifyMultiObjectOverspeedSelection() {
+        CameraPoint noLimit = marker(501, 55.75, 37.61, 1);
+        noLimit.speedRules = "";
+        CameraPoint limited = marker(502, 55.751, 37.611, 1);
+        limited.speedRules = SpeedControlRules.encode(60, false,
+                -1, -1, 0, 0, SpeedControlRules.CAR);
+        StrelkaAlertTracker tracker = activeTracker(java.util.Arrays.asList(
+                observation(noLimit, 100, true, false),
+                observation(limited, 200, true, false)), 90f);
+        StrelkaAlertTracker.State overspeed = tracker.snapshot().overspeedCandidate(90f);
+        check(overspeed != null && overspeed.object.id == limited.id,
+                "a farther limited object requests a beep when the nearest has no limit");
+
+        CameraPoint lowerId = marker(513, 55.752, 37.612, 1);
+        lowerId.speedRules = SpeedControlRules.encode(50, false,
+                -1, -1, 0, 0, SpeedControlRules.CAR);
+        CameraPoint higherId = marker(529, 55.753, 37.613, 1);
+        higherId.speedRules = SpeedControlRules.encode(60, false,
+                -1, -1, 0, 0, SpeedControlRules.CAR);
+        StrelkaAlertTracker.Observation lower = observation(lowerId, 150, true, false);
+        StrelkaAlertTracker.Observation higher = observation(higherId, 150, true, false);
+        long forward = activeTracker(java.util.Arrays.asList(higher, lower), 90f)
+                .snapshot().overspeedCandidate(90f).object.id;
+        long reversed = activeTracker(java.util.Arrays.asList(lower, higher), 90f)
+                .snapshot().overspeedCandidate(90f).object.id;
+        check(forward == lowerId.id && reversed == lowerId.id,
+                "equal-distance overspeed selection is stable across input order");
+
+        CameraPoint highLimit = marker(530, 55.754, 37.614, 1);
+        highLimit.speedRules = SpeedControlRules.encode(100, false,
+                -1, -1, 0, 0, SpeedControlRules.CAR);
+        tracker = activeTracker(java.util.Arrays.asList(
+                observation(highLimit, 90, true, false),
+                observation(limited, 200, true, false)), 90f);
+        overspeed = tracker.snapshot().overspeedCandidate(90f);
+        check(overspeed != null && overspeed.object.id == limited.id,
+                "a farther object requests a beep when the nearest limit is higher");
+    }
+
+    private static StrelkaAlertTracker activeTracker(
+            List<StrelkaAlertTracker.Observation> observations, float speedKmh) {
+        StrelkaAlertTracker tracker = new StrelkaAlertTracker();
+        StrelkaAlertTracker.Update update = tracker.update(observations, speedKmh, true);
+        check(update.activeCount == observations.size(), "test objects become active");
+        for (StrelkaAlertTracker.Observation item : observations) {
+            tracker.markSpoken(item.object.id);
+        }
+        return tracker;
+    }
+
+    private static void verifyRadarScanRecoveryGate() {
+        RadarScanGate gate = new RadarScanGate();
+        RadarScanGate.Decision initial = gate.assess(
+                1_000L, true, 5f, Double.MAX_VALUE);
+        check(initial.scanRequested && !initial.gpsRecovered,
+                "the initial accurate fix requests a normal scan");
+        gate.accept(initial);
+
+        RadarScanGate.Decision poorAccuracy = gate.assess(
+                8_000L, true, 80f, 100d);
+        check(!poorAccuracy.scanRequested,
+                "a poor-accuracy fix does not request a radar scan");
+        RadarScanGate.Decision goodAfterPoor = gate.assess(
+                9_000L, true, 5f, 10d);
+        check(goodAfterPoor.scanRequested && goodAfterPoor.gpsRecovered,
+                "poor accuracy does not consume recovery before a good fix");
+        gate.accept(goodAfterPoor);
+        check(!gate.assess(10_000L, true, 5f, 10d).gpsRecovered,
+                "an accepted radar scan consumes recovery");
+
+        gate = new RadarScanGate();
+        initial = gate.assess(1_000L, true, 3f, Double.MAX_VALUE);
+        gate.accept(initial);
+        RadarScanGate.Decision lowDisplacementNetwork = gate.assess(
+                8_000L, true, 3f, 1d);
+        check(!lowDisplacementNetwork.scanRequested,
+                "a low-displacement network fix does not request a radar scan");
+        RadarScanGate.Decision goodAfterNetwork = gate.assess(
+                9_000L, true, 3f, 4d);
+        check(goodAfterNetwork.scanRequested && goodAfterNetwork.gpsRecovered,
+                "a low-displacement network fix does not consume recovery");
+
+        RadarScanGate.Decision retryAfterContention = gate.assess(
+                10_000L, true, 3f, 5d);
+        check(retryAfterContention.scanRequested && retryAfterContention.gpsRecovered,
+                "an unaccepted scan keeps recovery pending through DB contention");
+
+        gate = new RadarScanGate();
+        initial = gate.assess(1_000L, true, 3f, Double.MAX_VALUE);
+        gate.accept(initial);
+        for (long elapsed = 2_000L; elapsed <= 7_000L; elapsed += 1_000L) {
+            check(!gate.assess(elapsed, true, 3f, 1d).scanRequested,
+                    "continuous low displacement does not request a scan");
+        }
+        RadarScanGate.Decision movementAfterContinuousFixes = gate.assess(
+                8_000L, true, 3f, 4d);
+        check(movementAfterContinuousFixes.scanRequested
+                        && !movementAfterContinuousFixes.gpsRecovered,
+                "continuous GPS fixes do not fabricate a recovery event");
     }
 
     private static StrelkaAlertTracker.Observation observation(

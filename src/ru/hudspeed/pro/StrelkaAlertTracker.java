@@ -1,6 +1,8 @@
 package ru.gpsantiradar.app;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -8,6 +10,12 @@ import java.util.Map;
 
 /** Stateful approach confirmation and re-alert behavior reconstructed from Strelka HUD. */
 public final class StrelkaAlertTracker {
+    private static final Comparator<State> NEAREST_FIRST = new Comparator<State>() {
+        @Override public int compare(State left, State right) {
+            int distance = Integer.compare(left.distanceMeters, right.distanceMeters);
+            return distance != 0 ? distance : Long.compare(left.object.id, right.object.id);
+        }
+    };
     private final Map<Long, State> states = new HashMap<>();
 
     public Update update(List<Observation> observations, float speedKmh,
@@ -61,25 +69,19 @@ public final class StrelkaAlertTracker {
         State closestActive = null;
         State pendingVoice = null;
         State closestTracking = null;
-        int activeCount = 0;
-        for (State state : states.values()) {
-            if (closestTracking == null
-                    || state.distanceMeters < closestTracking.distanceMeters) {
-                closestTracking = state;
-            }
+        List<State> ordered = new ArrayList<>(states.values());
+        Collections.sort(ordered, NEAREST_FIRST);
+        Collections.sort(exited, NEAREST_FIRST);
+        List<State> active = new ArrayList<>();
+        for (State state : ordered) {
+            if (closestTracking == null) closestTracking = state;
             if (!state.active) continue;
-            activeCount++;
-            if (closestActive == null
-                    || state.distanceMeters < closestActive.distanceMeters) {
-                closestActive = state;
-            }
-            if (!state.spoken && (pendingVoice == null
-                    || state.distanceMeters < pendingVoice.distanceMeters)) {
-                pendingVoice = state;
-            }
+            active.add(state);
+            if (closestActive == null) closestActive = state;
+            if (!state.spoken && pendingVoice == null) pendingVoice = state;
         }
         return new Update(exited, closestActive, pendingVoice,
-                closestTracking, activeCount);
+                closestTracking, active);
     }
 
     public void markSpoken(long objectId) {
@@ -129,14 +131,26 @@ public final class StrelkaAlertTracker {
         final State pendingVoice;
         final State closestTracking;
         final int activeCount;
+        private final List<State> active;
 
         Update(List<State> exited, State closestActive, State pendingVoice,
-               State closestTracking, int activeCount) {
-            this.exited = exited;
+               State closestTracking, List<State> active) {
+            this.exited = Collections.unmodifiableList(new ArrayList<>(exited));
             this.closestActive = closestActive;
             this.pendingVoice = pendingVoice;
             this.closestTracking = closestTracking;
-            this.activeCount = activeCount;
+            this.active = Collections.unmodifiableList(new ArrayList<>(active));
+            this.activeCount = active.size();
+        }
+
+        State overspeedCandidate(float speedKmh) {
+            for (State state : active) {
+                if (state.spoken
+                        && StrelkaAlertAlgorithm.isOverspeeding(state.object, speedKmh)) {
+                    return state;
+                }
+            }
+            return null;
         }
     }
 }

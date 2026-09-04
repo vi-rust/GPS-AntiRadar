@@ -4,8 +4,10 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDatabaseLockedException;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteStatement;
+import android.database.sqlite.SQLiteTableLockedException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,7 +18,10 @@ public final class CameraDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "speedcams.db";
     private static final int DB_VERSION = 4;
 
-    public CameraDatabase(Context context) { super(context, DB_NAME, null, DB_VERSION); }
+    public CameraDatabase(Context context) {
+        super(context, DB_NAME, null, DB_VERSION);
+        setWriteAheadLoggingEnabled(true);
+    }
 
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE cameras (" +
@@ -37,7 +42,7 @@ public final class CameraDatabase extends SQLiteOpenHelper {
 
     public RadarBaseParser.Result importRadarBase(InputStream input) throws IOException {
         final SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
+        db.beginTransactionNonExclusive();
         try {
             db.delete("cameras", null, null);
             db.delete("metadata", null, null);
@@ -104,8 +109,12 @@ public final class CameraDatabase extends SQLiteOpenHelper {
         double lonDelta = radiusMeters / (111320.0 * cos);
         String[] args = { Double.toString(lat - latDelta), Double.toString(lat + latDelta),
                 Double.toString(lon - lonDelta), Double.toString(lon + lonDelta) };
-        return query(cameraColumns() + "FROM cameras WHERE lat BETWEEN ? AND ? " +
-                "AND lon BETWEEN ? AND ?", args);
+        try {
+            return query(cameraColumns() + "FROM cameras WHERE lat BETWEEN ? AND ? " +
+                    "AND lon BETWEEN ? AND ?", args);
+        } catch (SQLiteDatabaseLockedException | SQLiteTableLockedException contention) {
+            return null;
+        }
     }
 
     public double[] bounds() {
