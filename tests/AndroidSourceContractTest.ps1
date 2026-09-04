@@ -254,6 +254,12 @@ $readme = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "README.md")
 Assert-Contains $readme 'Android Auto' "README must document Android Auto"
 Assert-Contains $readme 'TrackingService' "README must describe the shared alert service"
 Assert-Contains $readme 'DHU' "README must document Desktop Head Unit testing"
+Assert-Contains $readme '\u0440\u0435\u0436\u0438\u043c \u0440\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u0447\u0438\u043a\u0430\s+Android Auto' "README must require Android Auto developer mode for DHU"
+Assert-Contains $readme '\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u044b\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438' "README must require Android Auto unknown sources for DHU"
+Assert-Contains $readme '\u0441\u0435\u0440\u0432\u0435\u0440 \u0433\u043e\u043b\u043e\u0432\u043d\u043e\u0433\u043e \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0430' "README must require starting the head unit server for DHU"
+Assert-Contains $readme 'LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb\.exe' "README must define the SDK adb executable for DHU"
+Assert-Contains $readme '\& \$adb forward tcp:5277 tcp:5277' "README must forward the DHU port through adb"
+Assert-Contains $readme 'desktop-head-unit\.exe' "README must start the DHU executable"
 
 $automotiveDescriptorPath = Join-Path $Project "res\xml\automotive_app_desc.xml"
 if (-not (Test-Path $automotiveDescriptorPath)) {
