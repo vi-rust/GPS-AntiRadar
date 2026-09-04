@@ -144,9 +144,14 @@ public final class StrelkaAlertTracker {
         }
 
         State overspeedCandidate(float speedKmh) {
+            return overspeedCandidate(speedKmh, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH);
+        }
+
+        State overspeedCandidate(float speedKmh, int thresholdKmh) {
             for (State state : active) {
                 if (state.spoken
-                        && StrelkaAlertAlgorithm.isOverspeeding(state.object, speedKmh)) {
+                        && StrelkaAlertAlgorithm.isOverspeeding(
+                        state.object, speedKmh, thresholdKmh)) {
                     return state;
                 }
             }

@@ -224,8 +224,13 @@ public final class TrackingService extends Service implements LocationListener {
         } else if (!Float.isNaN(radarHeading)) {
             heading = radarHeading;
         }
-        int fallbackAlertDistance = getSharedPreferences("settings", MODE_PRIVATE)
-                .getInt("alert_distance", 800);
+        int fallbackAlertDistance = getSharedPreferences(
+                AppSettings.PREFERENCES, MODE_PRIVATE)
+                .getInt(AppSettings.ALERT_DISTANCE, 800);
+        int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
+                getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
+                        .getInt(AppSettings.OVERSPEED_THRESHOLD,
+                                AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
         CameraPoint nearest = null;
         double nearestDistance = Double.MAX_VALUE;
         int nearestAlertDistance = 0;
@@ -289,7 +294,8 @@ public final class TrackingService extends Service implements LocationListener {
             soundPlayer.objectFinished(finishedObject);
         }
 
-        String alertState = runAlertSequence(alertUpdate, speedKmh, scanPerformed,
+        String alertState = runAlertSequence(alertUpdate, speedKmh, overspeedThresholdKmh,
+                scanPerformed,
                 nearest, nearestDistance, nearestAlertDistance);
         sendUpdate(location, speedKmh, nearest, nearestDistance,
                 nearestAlertDistance, alertState);
@@ -309,6 +315,7 @@ public final class TrackingService extends Service implements LocationListener {
     }
 
     private String runAlertSequence(StrelkaAlertTracker.Update update, float speedKmh,
+                                    int overspeedThresholdKmh,
                                     boolean scanPerformed,
                                     CameraPoint nearest, double nearestDistance,
                                     int nearestAlertDistance) {
@@ -320,12 +327,13 @@ public final class TrackingService extends Service implements LocationListener {
             return "Вход подтверждён: голос · " + pending.distanceMeters + " м";
         }
         StrelkaAlertTracker.State closest = update.closestActive;
-        StrelkaAlertTracker.State overspeed = update.overspeedCandidate(speedKmh);
+        StrelkaAlertTracker.State overspeed = update.overspeedCandidate(
+                speedKmh, overspeedThresholdKmh);
         if (overspeed != null) {
             boolean signaled = scanPerformed
                     && soundPlayer.beepIfIdle(overspeed.distanceMeters);
             return "В зоне: " + overspeed.distanceMeters + " м · превышение +"
-                    + StrelkaAlertAlgorithm.OVERSPEED_THRESHOLD_KMH + " · "
+                    + overspeedThresholdKmh + " · "
                     + (signaled ? "сигнал" : "ожидание сигнала");
         }
         if (closest != null && closest.spoken) {
@@ -424,7 +432,12 @@ public final class TrackingService extends Service implements LocationListener {
                 nearest == null || nearest.isRoadObject() ? 0 : nearest.currentSpeedLimit());
         update.putExtra(EXTRA_ALERT_DISTANCE, nearest == null ? 0 : alertDistance);
         update.putExtra(EXTRA_ALERT_STATE, alertState);
-        update.putExtra(EXTRA_ALERT_ALGORITHM, StrelkaAlertAlgorithm.screenSummary());
+        int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
+                getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
+                        .getInt(AppSettings.OVERSPEED_THRESHOLD,
+                                AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
+        update.putExtra(EXTRA_ALERT_ALGORITHM,
+                StrelkaAlertAlgorithm.screenSummary(overspeedThresholdKmh));
         sendBroadcast(update);
     }
 

@@ -7,7 +7,9 @@ import com.yandex.mapkit.MapKitFactory;
 
 public final class GpsAntiRadarApplication extends Application {
     private static boolean initialized;
-    private final ProcessLaunchGuard radarBaseUpdateGuard = new ProcessLaunchGuard();
+    private final ProcessLaunchGuard radarBaseStartupUpdateGuard = new ProcessLaunchGuard();
+    private final RadarBaseUpdateSingleFlight radarBaseUpdateGuard =
+            new RadarBaseUpdateSingleFlight();
 
     @Override public void onCreate() {
         super.onCreate();
@@ -32,6 +34,14 @@ public final class GpsAntiRadarApplication extends Application {
     }
 
     public boolean claimRadarBaseStartupUpdate() {
-        return radarBaseUpdateGuard.claim();
+        return radarBaseStartupUpdateGuard.claim();
+    }
+
+    public boolean tryStartRadarBaseUpdate() {
+        return radarBaseUpdateGuard.tryStart();
+    }
+
+    public void finishRadarBaseUpdate() {
+        radarBaseUpdateGuard.finish();
     }
 }

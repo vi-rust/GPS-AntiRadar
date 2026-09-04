@@ -116,6 +116,15 @@ public final class ParserGeoTest {
         check(!StrelkaAlertAlgorithm.isOverspeeding(directed, 70f)
                         && StrelkaAlertAlgorithm.isOverspeeding(directed, 71f),
                 "beeper starts only above the 10 km/h tolerance");
+        check(AppSettings.clampOverspeedThreshold(-1) == 0
+                        && AppSettings.clampOverspeedThreshold(7) == 7
+                        && AppSettings.clampOverspeedThreshold(21) == 20,
+                "beep overspeed tolerance is clamped to the menu range");
+        check(!StrelkaAlertAlgorithm.isOverspeeding(directed, 60f, 0)
+                        && StrelkaAlertAlgorithm.isOverspeeding(directed, 60.1f, 0)
+                        && !StrelkaAlertAlgorithm.isOverspeeding(directed, 80f, 20)
+                        && StrelkaAlertAlgorithm.isOverspeeding(directed, 80.1f, 20),
+                "beeper uses the configured 0 to 20 km/h tolerance");
 
         CameraPoint rear = new CameraPoint();
         rear.id = 101;
@@ -135,6 +144,7 @@ public final class ParserGeoTest {
         verifyRadarScanRecoveryGate();
         verifyKnownReleaseHistory();
         verifyProcessLaunchGuard();
+        verifyRadarBaseUpdateSingleFlight();
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
         verifyMapMarkerEntityDiff();
@@ -238,6 +248,9 @@ public final class ParserGeoTest {
         overspeed = tracker.snapshot().overspeedCandidate(90f);
         check(overspeed != null && overspeed.object.id == limited.id,
                 "a farther object requests a beep when the nearest limit is higher");
+        check(tracker.snapshot().overspeedCandidate(80f, 20) == null
+                        && tracker.snapshot().overspeedCandidate(81f, 20) != null,
+                "multi-object beep selection uses the configured tolerance");
     }
 
     private static StrelkaAlertTracker activeTracker(
@@ -310,20 +323,21 @@ public final class ParserGeoTest {
 
     private static void verifyKnownReleaseHistory() {
         List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
-        check(releases.size() == 7, "about dialog contains every known release");
-        check(releases.get(0).version.equals("4.9.3")
-                        && releases.get(1).version.equals("4.9.2")
-                        && releases.get(2).version.equals("4.9.1")
-                        && releases.get(3).version.equals("4.9.0")
-                        && releases.get(4).version.equals("4.8.1")
-                        && releases.get(5).version.equals("4.8.0")
-                        && releases.get(6).version.equals("4.7.1"),
+        check(releases.size() == 8, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.4")
+                        && releases.get(1).version.equals("4.9.3")
+                        && releases.get(2).version.equals("4.9.2")
+                        && releases.get(3).version.equals("4.9.1")
+                        && releases.get(4).version.equals("4.9.0")
+                        && releases.get(5).version.equals("4.8.1")
+                        && releases.get(6).version.equals("4.8.0")
+                        && releases.get(7).version.equals("4.7.1"),
                 "release history is newest first");
         for (ReleaseHistory.Entry release : releases) {
             check(release.changes != null && !release.changes.trim().isEmpty(),
                     "every release has a visible change description");
         }
-        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.3");
+        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.4");
         check(current != null && !current.changes.trim().isEmpty(),
                 "current release has a visible change description");
         check(ReleaseHistory.find("missing") == null,
@@ -334,6 +348,15 @@ public final class ParserGeoTest {
         ProcessLaunchGuard guard = new ProcessLaunchGuard();
         check(guard.claim(), "cold process launch starts the RadarBase update");
         check(!guard.claim(), "activity recreation does not repeat the startup update");
+    }
+
+    private static void verifyRadarBaseUpdateSingleFlight() {
+        RadarBaseUpdateSingleFlight guard = new RadarBaseUpdateSingleFlight();
+        check(guard.tryStart(), "the first database update starts");
+        check(!guard.tryStart(), "a concurrent database update is coalesced");
+        guard.finish();
+        check(guard.tryStart(), "a later database update starts after completion");
+        guard.finish();
     }
 
     private static void verifyCameraMarkerDiff() {

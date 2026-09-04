@@ -4,7 +4,8 @@ public final class StrelkaAlertAlgorithm {
     public static final int SEARCH_RADIUS_METERS = 1600;
     public static final int ACQUIRE_DIRECTION_TOLERANCE_DEGREES = 25;
     public static final int RETAIN_DIRECTION_TOLERANCE_DEGREES = 45;
-    public static final int OVERSPEED_THRESHOLD_KMH = 10;
+    public static final int OVERSPEED_THRESHOLD_KMH =
+            AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH;
     public static final float MAX_APPROACH_CONFIDENCE = 100f;
 
     private static final double ZONE_MARGIN = 1.1d;
@@ -87,8 +88,14 @@ public final class StrelkaAlertAlgorithm {
     }
 
     public static boolean isOverspeeding(CameraPoint object, float speedKmh) {
+        return isOverspeeding(object, speedKmh, OVERSPEED_THRESHOLD_KMH);
+    }
+
+    public static boolean isOverspeeding(CameraPoint object, float speedKmh,
+                                         int thresholdKmh) {
         int limit = object.currentSpeedLimit();
-        return limit > 0 && speedKmh > limit + OVERSPEED_THRESHOLD_KMH;
+        return limit > 0 && speedKmh > limit
+                + AppSettings.clampOverspeedThreshold(thresholdKmh);
     }
 
     public static int spokenDistance(int distanceMeters) {
@@ -116,8 +123,13 @@ public final class StrelkaAlertAlgorithm {
     }
 
     public static String screenSummary() {
+        return screenSummary(OVERSPEED_THRESHOLD_KMH);
+    }
+
+    public static String screenSummary(int thresholdKmh) {
         return "1600 м → коридор → подтверждение → голос один раз → "
-                + "сигнал при +10 км/ч → полный выход/сброс";
+                + "сигнал при +" + AppSettings.clampOverspeedThreshold(thresholdKmh)
+                + " км/ч → полный выход/сброс";
     }
 
     private static boolean matchesDirection(CameraPoint object, float vehicleHeading,

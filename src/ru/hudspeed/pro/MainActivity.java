@@ -6,6 +6,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -63,8 +64,11 @@ import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.text.DateFormat;
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -76,7 +80,7 @@ public final class MainActivity extends Activity {
     private static final int LOCATION_REQUEST = 100;
     private static final int NOTIFICATION_REQUEST = 102;
     private static final int GREEN = Color.rgb(0, 166, 82);
-    private static final String SETTINGS = "settings";
+    private static final String SETTINGS = AppSettings.PREFERENCES;
     private static final String MAPKIT_KEY = "yandex_mapkit_key";
     private static final String MAPKIT_PENDING = "mapkit_startup_pending";
     private static final String MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4";
@@ -86,6 +90,8 @@ public final class MainActivity extends Activity {
             "https://radarbase.info/export/cache/RU/main_extended.json";
     private static final String RADARBASE_ETAG = "radarbase_etag";
     private static final String RADARBASE_MODIFIED = "radarbase_modified";
+    private static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
+            AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD;
     private static final String ACTION_RADARBASE_UPDATED =
             "ru.gpsantiradar.app.RADARBASE_UPDATED";
     private static final String RADARBASE_COORDINATE_FIX = "radarbase_coordinate_fix_v1";
@@ -100,7 +106,8 @@ public final class MainActivity extends Activity {
     private TextView speedView;
     private TextView distanceView;
     private TextView cameraView;
-    private TextView databaseView;
+    private TextView aboutDatabaseCountView;
+    private TextView aboutLastDownloadView;
     private LinearLayout hudPanel;
     private FrameLayout mapOverlay;
     private TextView cameraHintView;
@@ -182,6 +189,7 @@ public final class MainActivity extends Activity {
     private final BroadcastReceiver radarBaseReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             refreshDatabaseCount();
+            refreshAboutDatabaseInfo();
             loadVisibleCameraMarkers();
         }
     };
@@ -345,10 +353,6 @@ public final class MainActivity extends Activity {
         cameraView = text("Объектов впереди не найдено", 13, GREEN, Typeface.BOLD);
         cameraView.setGravity(Gravity.START);
         hudPanel.addView(cameraView);
-        databaseView = text("База: 0 объектов", 11, Color.DKGRAY, Typeface.NORMAL);
-        databaseView.setPadding(0, dp(9), 0, 0);
-        hudPanel.addView(databaseView);
-
         ImageButton menuButton = iconButton(ru.gpsantiradar.app.R.drawable.ic_menu, "Меню");
         menuButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showAppMenu(); }
@@ -448,6 +452,48 @@ public final class MainActivity extends Activity {
         });
         distanceContent.addView(range, new LinearLayout.LayoutParams(-1, dp(42)));
         content.addView(distanceRow, new LinearLayout.LayoutParams(-1, dp(86)));
+
+        LinearLayout overspeedRow = new LinearLayout(this);
+        overspeedRow.setOrientation(LinearLayout.HORIZONTAL);
+        overspeedRow.setGravity(Gravity.CENTER_VERTICAL);
+        overspeedRow.setPadding(dp(12), dp(6), dp(12), dp(6));
+        ImageView overspeedIcon = new ImageView(this);
+        overspeedIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_speed_limit);
+        overspeedRow.addView(overspeedIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        LinearLayout overspeedContent = new LinearLayout(this);
+        overspeedContent.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams overspeedContentParams =
+                new LinearLayout.LayoutParams(0, -2, 1f);
+        overspeedContentParams.setMargins(dp(14), 0, 0, 0);
+        overspeedRow.addView(overspeedContent, overspeedContentParams);
+        final TextView overspeedLabel = text("", 15,
+                Color.rgb(35, 35, 35), Typeface.NORMAL);
+        overspeedContent.addView(overspeedLabel);
+        SeekBar overspeedThreshold = new SeekBar(this);
+        overspeedThreshold.setMax(AppSettings.MAX_OVERSPEED_THRESHOLD_KMH);
+        int savedOverspeedThreshold = AppSettings.clampOverspeedThreshold(
+                getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
+                        AppSettings.OVERSPEED_THRESHOLD,
+                        AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
+        overspeedThreshold.setProgress(savedOverspeedThreshold);
+        overspeedLabel.setText("Предел превышения для beep: "
+                + savedOverspeedThreshold + " км/ч");
+        overspeedThreshold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress,
+                                                     boolean fromUser) {
+                int value = AppSettings.clampOverspeedThreshold(progress);
+                overspeedLabel.setText("Предел превышения для beep: " + value + " км/ч");
+                if (fromUser) {
+                    getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
+                            .putInt(AppSettings.OVERSPEED_THRESHOLD, value).apply();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        overspeedContent.addView(overspeedThreshold,
+                new LinearLayout.LayoutParams(-1, dp(42)));
+        content.addView(overspeedRow, new LinearLayout.LayoutParams(-1, dp(86)));
 
         LinearLayout transparencyRow = new LinearLayout(this);
         transparencyRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -549,6 +595,25 @@ public final class MainActivity extends Activity {
         currentVersionParams.setMargins(0, dp(2), 0, dp(16));
         content.addView(currentVersion, currentVersionParams);
 
+        TextView databaseTitle = text("База объектов", 17,
+                Color.rgb(30, 30, 30), Typeface.BOLD);
+        content.addView(databaseTitle, new LinearLayout.LayoutParams(-1, -2));
+
+        aboutDatabaseCountView = text("Объектов в базе: загрузка…", 14,
+                Color.rgb(45, 45, 45), Typeface.NORMAL);
+        LinearLayout.LayoutParams databaseCountParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        databaseCountParams.setMargins(0, dp(4), 0, 0);
+        content.addView(aboutDatabaseCountView, databaseCountParams);
+
+        aboutLastDownloadView = text("Последняя успешная загрузка: не выполнялась", 14,
+                Color.rgb(45, 45, 45), Typeface.NORMAL);
+        LinearLayout.LayoutParams lastDownloadParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        lastDownloadParams.setMargins(0, dp(2), 0, dp(16));
+        content.addView(aboutLastDownloadView, lastDownloadParams);
+        refreshAboutDatabaseInfo();
+
         ReleaseHistory.Entry currentRelease = ReleaseHistory.find(BuildConfig.VERSION_NAME);
         if (currentRelease != null) {
             TextView currentChangesTitle = text("Изменения текущей версии", 17,
@@ -598,6 +663,12 @@ public final class MainActivity extends Activity {
                 .setView(scroll)
                 .setNegativeButton("Закрыть", null)
                 .create();
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override public void onDismiss(DialogInterface ignored) {
+                aboutDatabaseCountView = null;
+                aboutLastDownloadView = null;
+            }
+        });
         dialog.show();
         styleRoundedDialog(dialog);
         if (dialog.getWindow() != null) {
@@ -1208,7 +1279,15 @@ public final class MainActivity extends Activity {
     }
 
     private void updateRadarBase() {
-        databaseView.setText("Загрузка RadarBase…");
+        final GpsAntiRadarApplication application =
+                (GpsAntiRadarApplication) getApplication();
+        if (!application.tryStartRadarBaseUpdate()) {
+            Toast.makeText(this, "Обновление базы RadarBase уже выполняется",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "Обновление базы RadarBase начато",
+                Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override public void run() {
                 HttpURLConnection connection = null;
@@ -1256,12 +1335,15 @@ public final class MainActivity extends Activity {
                         editor.putBoolean(RADARBASE_COORDINATE_FIX, true);
                     }
                     editor.putInt(RADARBASE_IMPORT_FORMAT, CURRENT_RADARBASE_IMPORT_FORMAT);
+                    editor.putLong(RADARBASE_LAST_SUCCESSFUL_DOWNLOAD,
+                            System.currentTimeMillis());
                     editor.apply();
                     showRadarBaseImportSuccess(result);
                 } catch (Exception error) {
                     showRadarBaseImportError(error);
                 } finally {
                     if (connection != null) connection.disconnect();
+                    application.finishRadarBaseUpdate();
                 }
             }
         }, "radarbase-download").start();
@@ -1276,7 +1358,6 @@ public final class MainActivity extends Activity {
                 new Intent(ACTION_RADARBASE_UPDATED).setPackage(getPackageName()));
         runOnUiThread(new Runnable() {
             @Override public void run() {
-                databaseView.setText("База: " + result.count + " объектов");
                 String suffix = result.coordinatesCorrected ? " · координаты восстановлены"
                         : " · без поправки координат";
                 Toast.makeText(MainActivity.this, "Импортировано: " + result.count + suffix,
@@ -1288,7 +1369,6 @@ public final class MainActivity extends Activity {
     private void showRadarBaseImportError(final Exception error) {
         runOnUiThread(new Runnable() {
             @Override public void run() {
-                databaseView.setText("Ошибка обновления");
                 String detail = error.getMessage();
                 Toast.makeText(MainActivity.this, detail == null || detail.trim().isEmpty()
                                 ? "Не удалось загрузить JSON RadarBase" : detail,
@@ -1302,10 +1382,8 @@ public final class MainActivity extends Activity {
             @Override public void run() {
                 try (CameraDatabase db = new CameraDatabase(MainActivity.this)) {
                     final int count = db.count();
-                    final String exportDate = db.exportDate();
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
-                            databaseView.setText("База: " + count + " объектов");
                             if (count == 0) {
                                 cameraView.setText("Обновите базу RadarBase");
                                 cameraView.setTextColor(Color.DKGRAY);
@@ -1315,6 +1393,42 @@ public final class MainActivity extends Activity {
                 }
             }
         }, "camera-count").start();
+    }
+
+    private void refreshAboutDatabaseInfo() {
+        final TextView countTarget = aboutDatabaseCountView;
+        final TextView lastDownloadTarget = aboutLastDownloadView;
+        if (countTarget == null && lastDownloadTarget == null) return;
+
+        if (lastDownloadTarget != null) {
+            long timestamp = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                    .getLong(RADARBASE_LAST_SUCCESSFUL_DOWNLOAD, 0L);
+            lastDownloadTarget.setText("Последняя успешная загрузка: "
+                    + formatLastSuccessfulDownload(timestamp));
+        }
+        if (countTarget == null) return;
+        countTarget.setText("Объектов в базе: загрузка…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try (CameraDatabase db = new CameraDatabase(MainActivity.this)) {
+                    final int count = db.count();
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (aboutDatabaseCountView == countTarget) {
+                                countTarget.setText("Объектов в базе: "
+                                        + NumberFormat.getIntegerInstance().format(count));
+                            }
+                        }
+                    });
+                }
+            }
+        }, "about-camera-count").start();
+    }
+
+    private String formatLastSuccessfulDownload(long timestamp) {
+        if (timestamp <= 0L) return "не выполнялась";
+        return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                .format(new Date(timestamp));
     }
 
     private String cameraHint(CameraPoint camera) {
