@@ -343,6 +343,10 @@ if ($surfaceController -match 'IdentityHashMap|IdentityHashSet|releasedSurfaces|
     throw "surface ownership must not retain wrapper references in identity collections"
 }
 Assert-Contains $surfaceController 'surfaceResource != null && activeSurface == surface' "an exact repeated wrapper must not be released and passed back to the factory"
+Assert-Contains $surfaceController 'private void releaseResource\(boolean releaseSurface\)' "resource recreation must choose whether the Surface wrapper stays valid"
+Assert-Contains $surfaceController 'if \(!spec\.isUsable\(\)\) \{\s*releaseResource\(true\)' "an unusable exact wrapper must release its resource and Surface"
+Assert-Contains $surfaceController 'if \(spec\.equals\(activeSpec\)\) \{\s*clearActiveAreas\(\)' "same wrapper and spec must remain a no-op apart from area reset"
+Assert-Contains $surfaceController 'releaseResource\(false\);\s*\}\s*else' "a changed usable spec must preserve its exact Surface wrapper for recreation"
 Assert-Contains $surfaceController 'Surface ownedSurface = activeSurface' "surface destruction must follow the ordered callback contract"
 Assert-Contains $surfaceController 'callbackSurface != ownedSurface' "a distinct destroy wrapper must also be released"
 Assert-Contains $surfaceController '!activeSpec\.equals\(callbackSpec\)' "different-spec stale destroy must not release the replacement"
@@ -355,10 +359,15 @@ if ([regex]::Matches($surfaceController,
         'area == null \|\| area\.isEmpty\(\) \? null : new Rect\(area\)').Count -lt 2) {
     throw "empty stable and visible rectangles must clear the active generation"
 }
-$releaseIndex = $surfaceController.IndexOf("releaseSurface()")
+$releaseIndex = $surfaceController.IndexOf("releaseResource(true)")
 $createIndex = $surfaceController.IndexOf("surfaceFactory.create", $releaseIndex)
 if ($releaseIndex -lt 0 -or $createIndex -lt $releaseIndex) {
     throw "Existing car surface must be released before creating its replacement"
+}
+$activeSpecAssignment = $surfaceController.IndexOf("activeSpec = spec", $createIndex)
+if ($activeSpecAssignment -lt $createIndex -or
+        [regex]::Matches($surfaceController, 'activeSpec = spec').Count -ne 1) {
+    throw "active surface spec must only be assigned after successful resource creation"
 }
 Assert-Contains $surfaceController 'createVirtualDisplay' "Car surface must create a VirtualDisplay"
 Assert-Contains $surfaceController 'new Presentation' "Car surface must use Presentation"

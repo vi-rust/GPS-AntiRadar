@@ -103,15 +103,25 @@ public final class CarSurfaceController implements SurfaceCallback {
                 surfaceContainer.getHeight(),
                 surfaceContainer.getDpi());
         Surface surface = surfaceContainer.getSurface();
-        if (surface != null && surfaceResource != null && activeSurface == surface) {
-            activeSpec = spec;
-            clearActiveAreas();
-            return;
-        }
-        releaseSurface();
-        if (destroyed || !spec.isUsable()) {
-            releaseSurfaceObject(surface);
-            return;
+        boolean sameWrapper = surface != null
+                && surfaceResource != null
+                && activeSurface == surface;
+        if (sameWrapper) {
+            if (!spec.isUsable()) {
+                releaseResource(true);
+                return;
+            }
+            if (spec.equals(activeSpec)) {
+                clearActiveAreas();
+                return;
+            }
+            releaseResource(false);
+        } else {
+            releaseResource(true);
+            if (destroyed || !spec.isUsable()) {
+                releaseSurfaceObject(surface);
+                return;
+            }
         }
         try {
             SurfaceResource created = surfaceFactory.create(spec, surface);
@@ -126,7 +136,7 @@ public final class CarSurfaceController implements SurfaceCallback {
             created.onDrivingSnapshot(latestSnapshot);
         } catch (RuntimeException | LinkageError error) {
             if (surfaceResource != null && activeSurface == surface) {
-                releaseSurface();
+                releaseResource(true);
             } else {
                 releaseSurfaceObject(surface);
             }
@@ -148,7 +158,7 @@ public final class CarSurfaceController implements SurfaceCallback {
             return;
         }
         Surface ownedSurface = activeSurface;
-        releaseSurface();
+        releaseResource(true);
         // Callback order identifies the active generation. Identity is used
         // only to avoid releasing the same Java wrapper twice.
         if (callbackSurface != ownedSurface) releaseSurfaceObject(callbackSurface);
@@ -233,10 +243,10 @@ public final class CarSurfaceController implements SurfaceCallback {
         if (destroyed) return;
         destroyed = true;
         appManager.setSurfaceCallback(null);
-        releaseSurface();
+        releaseResource(true);
     }
 
-    private void releaseSurface() {
+    private void releaseResource(boolean releaseSurface) {
         SurfaceResource existing = surfaceResource;
         Surface surface = activeSurface;
         surfaceResource = null;
@@ -247,7 +257,7 @@ public final class CarSurfaceController implements SurfaceCallback {
         } catch (RuntimeException | LinkageError error) {
             Log.e(TAG, "Failed to release car surface content", error);
         } finally {
-            releaseSurfaceObject(surface);
+            if (releaseSurface) releaseSurfaceObject(surface);
         }
     }
 

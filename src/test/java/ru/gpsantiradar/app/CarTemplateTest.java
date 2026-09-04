@@ -238,6 +238,91 @@ public final class CarTemplateTest {
         testSurface.close();
     }
 
+    @Test public void exactSurfaceWithChangedSpecRecreatesBeforeRelease() {
+        CarContext carContext = carContext();
+        List<String> events = new ArrayList<>();
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface testSurface = new TestSurface();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    assertTrue("factory received a released Surface", surface.isValid());
+                    events.add("create:" + spec.width + "x" + spec.height
+                            + "@" + spec.dpi);
+                    return new NamedSurfaceResource(events, spec.width);
+                }, surfaces, message -> fail(message));
+
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 800, 480, 160));
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 1280, 720, 240));
+
+        assertEquals(Arrays.asList(
+                "create:800x480@160", "release:800",
+                "create:1280x720@240"), events);
+        assertEquals(0, surfaces.releaseCount(testSurface.surface));
+        controller.zoomBy(1f);
+        controller.destroy();
+        assertEquals(Arrays.asList(
+                "create:800x480@160", "release:800",
+                "create:1280x720@240", "zoom:1280", "release:1280"), events);
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
+        testSurface.close();
+    }
+
+    @Test public void exactSurfaceWithUnusableSpecReleasesResourceAndSurface() {
+        CarContext carContext = carContext();
+        List<String> events = new ArrayList<>();
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface testSurface = new TestSurface();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    events.add("create:" + spec.width);
+                    return new NamedSurfaceResource(events, spec.width);
+                }, surfaces, message -> fail(message));
+
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 800, 480, 160));
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 0, 480, 160));
+        controller.zoomBy(1f);
+
+        assertEquals(Arrays.asList("create:800", "release:800"), events);
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
+        controller.destroy();
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
+        testSurface.close();
+    }
+
+    @Test public void exactSurfaceChangedSpecFailureReleasesSurfaceAndReports() {
+        CarContext carContext = carContext();
+        List<String> events = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface testSurface = new TestSurface();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    assertTrue("factory received a released Surface", surface.isValid());
+                    events.add("create:" + spec.width);
+                    if (spec.width == 1280) {
+                        throw new IllegalStateException("replacement failed");
+                    }
+                    return new NamedSurfaceResource(events, spec.width);
+                }, surfaces, failures::add);
+
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 800, 480, 160));
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                testSurface.surface, 1280, 720, 240));
+
+        assertEquals(Arrays.asList(
+                "create:800", "release:800", "create:1280"), events);
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
+        assertEquals(1, failures.size());
+        controller.destroy();
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
+        testSurface.close();
+    }
+
     @Test public void unusableSurfaceIsReleasedWithoutCallingFactory() {
         CarContext carContext = carContext();
         int[] creates = { 0 };
