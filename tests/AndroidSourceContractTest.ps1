@@ -26,6 +26,11 @@ $listenerRegistry = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\
 $snapshot = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java")
 $snapshotAdapter = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshotIntent.java")
 $sharedMapLayer = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\SharedCameraMapLayer.java")
+$manifestPath = Join-Path $Project "AndroidManifest.xml"
+$manifest = [xml](Get-Content -Raw -Encoding UTF8 $manifestPath)
+$androidNamespace = "http://schemas.android.com/apk/res/android"
+$namespaceManager = New-Object System.Xml.XmlNamespaceManager($manifest.NameTable)
+$namespaceManager.AddNamespace("android", $androidNamespace)
 
 Assert-Contains $database 'setWriteAheadLoggingEnabled\(true\)' "CameraDatabase must enable WAL for concurrent readers"
 Assert-Contains $database 'beginTransactionNonExclusive\(\)' "RadarBase replacement must use a non-exclusive WAL transaction"
@@ -249,6 +254,117 @@ if (-not (Test-Path $automotiveDescriptorPath)) {
 $automotiveDescriptor = [xml](Get-Content -Raw -Encoding UTF8 $automotiveDescriptorPath)
 if ($automotiveDescriptor.automotiveApp.uses.name -ne "template") {
     throw "Android Auto descriptor must declare the template app category"
+}
+
+foreach ($permission in @(
+        "androidx.car.app.ACCESS_SURFACE",
+        "androidx.car.app.NAVIGATION_TEMPLATES")) {
+    $permissionNode = $manifest.SelectSingleNode(
+            "/manifest/uses-permission[@android:name='$permission']", $namespaceManager)
+    if ($null -eq $permissionNode) {
+        throw "Android Auto manifest permission is missing: $permission"
+    }
+}
+
+$applicationNode = $manifest.SelectSingleNode("/manifest/application", $namespaceManager)
+$minCarApi = $applicationNode.SelectSingleNode(
+        "meta-data[@android:name='androidx.car.app.minCarApiLevel']", $namespaceManager)
+if ($null -eq $minCarApi -or $minCarApi.GetAttribute("value", $androidNamespace) -ne "2") {
+    throw "Android Auto minimum Car API metadata must be 2"
+}
+$descriptorMetadata = $applicationNode.SelectSingleNode(
+        "meta-data[@android:name='com.google.android.gms.car.application']", $namespaceManager)
+if ($null -eq $descriptorMetadata -or
+        $descriptorMetadata.GetAttribute("resource", $androidNamespace) -ne
+                "@xml/automotive_app_desc") {
+    throw "Android Auto descriptor metadata is missing"
+}
+$carServiceNode = $applicationNode.SelectSingleNode(
+        "service[@android:name='.GpsCarAppService']", $namespaceManager)
+if ($null -eq $carServiceNode -or
+        $carServiceNode.GetAttribute("exported", $androidNamespace) -ne "true") {
+    throw "GpsCarAppService must be exported"
+}
+$serviceAction = $carServiceNode.SelectSingleNode(
+        "intent-filter/action[@android:name='androidx.car.app.CarAppService']",
+        $namespaceManager)
+$serviceCategory = $carServiceNode.SelectSingleNode(
+        "intent-filter/category[@android:name='androidx.car.app.category.NAVIGATION']",
+        $namespaceManager)
+if ($null -eq $serviceAction -or $null -eq $serviceCategory) {
+    throw "GpsCarAppService must declare the CarAppService action and navigation category"
+}
+
+$carSourceRoot = Join-Path $Project "src\ru\hudspeed\pro"
+$requiredCarSources = @(
+        "GpsCarAppService.java", "GpsCarSession.java", "CarSetupScreen.java",
+        "CarSurfaceSpec.java", "CarSurfaceController.java", "CarMapPresentation.java",
+        "CarMapScreen.java", "CarMapGestureController.java")
+foreach ($sourceName in $requiredCarSources) {
+    $sourcePath = Join-Path $carSourceRoot $sourceName
+    if (-not (Test-Path $sourcePath)) {
+        throw "Android Auto source is missing: $sourceName"
+    }
+}
+$carService = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "GpsCarAppService.java")
+$carSession = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "GpsCarSession.java")
+$surfaceController = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarSurfaceController.java")
+$carPresentation = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarMapPresentation.java")
+$carMapScreen = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "CarMapScreen.java")
+$carGestures = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarMapGestureController.java")
+
+Assert-Contains $carService 'new HostValidator\.Builder\(this\)\.build\(\)' "Car service must validate system and permission-bearing hosts"
+Assert-Contains $carService 'new GpsCarSession\(\)' "Car service must create GpsCarSession"
+Assert-Contains $carSession 'ACCESS_FINE_LOCATION' "Car session must require fine location"
+Assert-Contains $carSession 'ensureMapKit' "Car session must require a ready MapKit"
+Assert-Contains $carSession 'TrackingService\.ACTION_START' "Car session must start the shared tracker"
+if ($carSession -match 'new\s+RadarBaseUpdater|new\s+StrelkaAlertTracker') {
+    throw "Car session must not create a second updater or alert tracker"
+}
+Assert-Contains $carSession 'DrivingSnapshotIntent\.from' "Car session must decode shared tracking snapshots"
+Assert-Contains $carSession 'unregisterReceiver' "Car session must unregister its update receiver"
+if ($carSession -match 'stopService') {
+    throw "Car session destruction must not stop the shared TrackingService"
+}
+Assert-Contains $surfaceController 'implements SurfaceCallback' "Car controller must implement SurfaceCallback"
+Assert-Contains $surfaceController 'setSurfaceCallback\(this\)' "Car controller must register its surface callback"
+Assert-Contains $surfaceController 'setSurfaceCallback\(null\)' "Car controller destroy must clear its callback"
+$releaseIndex = $surfaceController.IndexOf("releaseSurface()")
+$createIndex = $surfaceController.IndexOf("surfaceFactory.create", $releaseIndex)
+if ($releaseIndex -lt 0 -or $createIndex -lt $releaseIndex) {
+    throw "Existing car surface must be released before creating its replacement"
+}
+Assert-Contains $surfaceController 'createVirtualDisplay' "Car surface must create a VirtualDisplay"
+Assert-Contains $surfaceController 'new Presentation' "Car surface must use Presentation"
+Assert-Contains $surfaceController 'presentation\.dismiss\(\)' "Car Presentation must be dismissed"
+Assert-Contains $surfaceController 'virtualDisplay\.release\(\)' "Car VirtualDisplay must be released"
+Assert-Contains $carPresentation 'new SharedCameraMapLayer' "Car presentation must use the shared camera layer"
+Assert-Contains $carPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
+if ($carPresentation -match 'alertAlgorithm') {
+    throw "Algorithm details must not be rendered in the car speed HUD"
+}
+Assert-Contains $carPresentation 'onStableAreaChanged' "Car HUD must respond to stable-area changes"
+Assert-Contains $carPresentation 'onVisibleAreaChanged' "Car map must respond to visible-area changes"
+Assert-Contains $carPresentation 'isDarkMode' "Car HUD must follow car dark mode"
+Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
+Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"
+Assert-Contains $carMapScreen 'setPanModeListener' "Car map must forward pan mode changes"
+Assert-Contains $carGestures 'Math\.log\(scaleFactor\).*Math\.log\(2' "Car scale must use logarithmic zoom"
+Assert-Contains $carGestures 'screenToWorld' "Car pan/click gestures must convert screen coordinates"
+Assert-Contains $carGestures 'Animation\.Type\.SMOOTH' "Car fling must use a short smooth map animation"
+
+foreach ($iconName in @(
+        "ic_car_zoom_in.xml", "ic_car_zoom_out.xml",
+        "ic_car_pan.xml", "ic_car_location.xml")) {
+    $iconPath = Join-Path $Project "res\drawable\$iconName"
+    if (-not (Test-Path $iconPath)) { throw "Android Auto icon is missing: $iconName" }
+    $icon = [xml](Get-Content -Raw -Encoding UTF8 $iconPath)
+    if ($icon.vector.path.Count -gt 1) {
+        throw "Android Auto icon must be a simple monochrome vector: $iconName"
+    }
 }
 
 Write-Output "AndroidSourceContractTest: OK"

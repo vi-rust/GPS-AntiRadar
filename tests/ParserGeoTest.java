@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ParserGeoTest {
     public static void main(String[] args) throws Exception {
+        verifyCarSurfaceSpec();
         String json = "{\"meta\":{\"ver\":\"3.0\",\"build\":3995,"
                 + "\"exportDate\":\"2026-08-28T05:05:00Z\"},"
                 + "\"objects\":["
@@ -903,6 +904,23 @@ public final class ParserGeoTest {
         point.angleDegrees = 20f;
         point.speedRules = "60";
         return point;
+    }
+
+    private static void verifyCarSurfaceSpec() {
+        CarSurfaceSpec usable = CarSurfaceSpec.from(1280, 720, 240);
+        check(usable.isUsable(), "positive car surface dimensions are usable");
+        check(usable.equals(CarSurfaceSpec.from(1280, 720, 240))
+                        && usable.hashCode() == CarSurfaceSpec.from(1280, 720, 240).hashCode(),
+                "car surface value equality includes matching dimensions and dpi");
+        check(!usable.equals(CarSurfaceSpec.from(1281, 720, 240))
+                        && !usable.equals(CarSurfaceSpec.from(1280, 721, 240))
+                        && !usable.equals(CarSurfaceSpec.from(1280, 720, 241)),
+                "car surface value equality distinguishes width, height and dpi");
+        check(!CarSurfaceSpec.from(0, 720, 240).isUsable()
+                        && !CarSurfaceSpec.from(1280, 0, 240).isUsable()
+                        && !CarSurfaceSpec.from(1280, 720, 0).isUsable()
+                        && !CarSurfaceSpec.from(-1, 720, 240).isUsable(),
+                "non-positive car surface dimensions or dpi are rejected");
     }
 
     private static float coordinateShift(int build, float direction) {
