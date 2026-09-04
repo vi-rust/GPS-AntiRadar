@@ -4,4 +4,5 @@
 /work/
 /outputs/
 /.superpowers/
+/.worktrees/
 *.keystore
