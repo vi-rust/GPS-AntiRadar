@@ -55,13 +55,17 @@ if ($drivingReceiver -match 'get(?:Float|Int|Long|Double|String)Extra\(TrackingS
 if ($snapshot -match '\b(?:import\s+)?android\.') {
     throw "DrivingSnapshot must remain independent from Android"
 }
-foreach ($extra in @("EXTRA_SPEED", "EXTRA_DISTANCE", "EXTRA_CAMERA", "EXTRA_CAMERA_ID",
-        "EXTRA_LIMIT", "EXTRA_ALERT_DISTANCE", "EXTRA_LATITUDE", "EXTRA_LONGITUDE",
-        "EXTRA_ALERT_STATE", "EXTRA_ALERT_ALGORITHM")) {
+foreach ($extra in @("EXTRA_SPEED", "EXTRA_ACCURACY", "EXTRA_DISTANCE", "EXTRA_CAMERA",
+        "EXTRA_CAMERA_ID", "EXTRA_LIMIT", "EXTRA_ALERT_DISTANCE", "EXTRA_LATITUDE",
+        "EXTRA_LONGITUDE", "EXTRA_ALERT_STATE", "EXTRA_ALERT_ALGORITHM")) {
     Assert-Contains $snapshotAdapter ([regex]::Escape("TrackingService.$extra")) "DrivingSnapshotIntent must read $extra"
 }
+Assert-Contains $snapshotAdapter 'getFloatExtra\(TrackingService\.EXTRA_ACCURACY,\s*Float\.NaN\)' "missing accuracy must remain distinguishable in a driving snapshot"
 if ([regex]::Matches($tracking, 'putExtra\(EXTRA_CAMERA_ID').Count -ne 2) {
     throw "TrackingService must include camera id in both update broadcasts"
+}
+if ([regex]::Matches($tracking, 'putExtra\(EXTRA_ACCURACY').Count -ne 2) {
+    throw "TrackingService must include location accuracy in both update broadcasts"
 }
 
 if ($activity -match 'databaseView') {

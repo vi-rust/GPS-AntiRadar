@@ -163,13 +163,18 @@ public final class ParserGeoTest {
                         && AppSettings.adjustHudTransparency(80, 1) == 80,
                 "HUD transparency uses 0..80 with a 5 percent step");
         check(AppSettings.clampAlertDistance(299) == 300
+                        && AppSettings.clampAlertDistance(350) == 300
                         && AppSettings.clampAlertDistance(2300) == 2000
-                        && AppSettings.adjustAlertDistance(250, 1) == 400,
-                "alert distance is normalized before adjustment");
+                        && AppSettings.adjustAlertDistance(350, 1) == 400
+                        && AppSettings.adjustAlertDistance(350, -1) == 300,
+                "alert distance floors to its step grid before adjustment");
         check(AppSettings.clampHudTransparency(-5) == 0
+                        && AppSettings.clampHudTransparency(12) == 10
                         && AppSettings.clampHudTransparency(95) == 80
+                        && AppSettings.adjustHudTransparency(12, 1) == 15
+                        && AppSettings.adjustHudTransparency(12, -1) == 5
                         && AppSettings.adjustHudTransparency(90, -1) == 75,
-                "HUD transparency is normalized before adjustment");
+                "HUD transparency floors to its step grid before adjustment");
         if (args.length > 0) {
             final int[] count = {0};
             RadarBaseParser.Result real;
@@ -195,6 +200,7 @@ public final class ParserGeoTest {
 
         DrivingSnapshot idle = DrivingSnapshot.idle();
         check(!idle.hasLocation() && !idle.hasObject()
+                        && Float.isNaN(idle.accuracyMeters)
                         && idle.cameraId == -1L && idle.distanceMeters == -1,
                 "idle driving snapshot has no location or object");
         DrivingHudPresentation idleHud = DrivingHudPresentation.from(idle);
@@ -204,9 +210,10 @@ public final class ParserGeoTest {
                         && !idleHud.hasActiveObject,
                 "idle HUD uses the shared empty state");
 
-        DrivingSnapshot insideZone = new DrivingSnapshot(64.6f, 250, "Камера", 42L,
-                80, 800, 56.84, 60.61, "inside", "diagnostic");
+        DrivingSnapshot insideZone = new DrivingSnapshot(64.6f, 3.5f, 250,
+                "Камера", 42L, 80, 800, 56.84, 60.61, "inside", "diagnostic");
         check(insideZone.hasLocation() && insideZone.hasObject()
+                        && insideZone.accuracyMeters == 3.5f
                         && insideZone.cameraId == 42L
                         && insideZone.alertState.equals("inside")
                         && insideZone.alertAlgorithm.equals("diagnostic"),
@@ -220,14 +227,14 @@ public final class ParserGeoTest {
                 "inside-zone HUD formats the active object without diagnostics");
 
         DrivingHudPresentation farHud = DrivingHudPresentation.from(new DrivingSnapshot(
-                70f, 1250, "Камера", 43L, 80, 800,
+                70f, Float.NaN, 1250, "Камера", 43L, 80, 800,
                 Double.NaN, Double.NaN, "", ""));
         check(farHud.distanceText.equals("1.3 км")
                         && farHud.speedColor == DrivingHudPresentation.COLOR_GREEN,
                 "HUD formats distances above one kilometer and inactive color");
 
         DrivingHudPresentation overspeedHud = DrivingHudPresentation.from(
-                new DrivingSnapshot(81f, 250, "Камера", 44L, 80, 800,
+                new DrivingSnapshot(81f, Float.NaN, 250, "Камера", 44L, 80, 800,
                         Double.NaN, Double.NaN, "", ""));
         check(overspeedHud.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
                 "overspeed color takes priority inside the alert zone");

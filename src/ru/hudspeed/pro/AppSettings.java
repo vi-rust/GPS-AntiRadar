@@ -25,8 +25,8 @@ public final class AppSettings {
     private AppSettings() {}
 
     public static int clampAlertDistance(int value) {
-        return Math.max(MIN_ALERT_DISTANCE_METERS,
-                Math.min(MAX_ALERT_DISTANCE_METERS, value));
+        return floorToStep(value, MIN_ALERT_DISTANCE_METERS,
+                MAX_ALERT_DISTANCE_METERS, ALERT_DISTANCE_STEP_METERS);
     }
 
     public static int adjustAlertDistance(int value, int direction) {
@@ -47,13 +47,18 @@ public final class AppSettings {
     }
 
     public static int clampHudTransparency(int value) {
-        return Math.max(MIN_HUD_TRANSPARENCY_PERCENT,
-                Math.min(MAX_HUD_TRANSPARENCY_PERCENT, value));
+        return floorToStep(value, MIN_HUD_TRANSPARENCY_PERCENT,
+                MAX_HUD_TRANSPARENCY_PERCENT, HUD_TRANSPARENCY_STEP_PERCENT);
     }
 
     public static int adjustHudTransparency(int value, int direction) {
         int normalized = clampHudTransparency(value);
         return clampHudTransparency(normalized
                 + Integer.signum(direction) * HUD_TRANSPARENCY_STEP_PERCENT);
+    }
+
+    private static int floorToStep(int value, int min, int max, int step) {
+        int clamped = Math.max(min, Math.min(max, value));
+        return min + ((clamped - min) / step) * step;
     }
 }

@@ -7,6 +7,7 @@ public final class DrivingSnapshotIntent {
 
     public static DrivingSnapshot from(Intent intent) {
         return new DrivingSnapshot(intent.getFloatExtra(TrackingService.EXTRA_SPEED, 0),
+                intent.getFloatExtra(TrackingService.EXTRA_ACCURACY, Float.NaN),
                 intent.getIntExtra(TrackingService.EXTRA_DISTANCE, -1),
                 intent.getStringExtra(TrackingService.EXTRA_CAMERA),
                 intent.getLongExtra(TrackingService.EXTRA_CAMERA_ID, -1),
