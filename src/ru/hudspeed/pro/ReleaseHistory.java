@@ -6,6 +6,10 @@ import java.util.List;
 
 public final class ReleaseHistory {
     private static final List<Entry> RELEASES = Collections.unmodifiableList(Arrays.asList(
+            new Entry("4.9.3", "Устранено моргание значков: неизменившиеся одиночные "
+                    + "объекты и группы сохраняются при масштабировании и прокрутке карты."),
+            new Entry("4.9.2", "Добавлена автоматическая проверка RadarBase при холодном "
+                    + "запуске и дифференциальное обновление объектов карты с 20% буфером."),
             new Entry("4.9.1", "Убрана техническая информация об алгоритме из плашки "
                     + "скорости. Добавлен раздел «О программе» с историей релизов."),
             new Entry("4.9.0", "Перенесён механизм зон Strelka: подтверждение подхода, "
@@ -23,6 +27,13 @@ public final class ReleaseHistory {
 
     public static List<Entry> entries() {
         return RELEASES;
+    }
+
+    public static Entry find(String version) {
+        for (Entry entry : RELEASES) {
+            if (entry.version.equals(version)) return entry;
+        }
+        return null;
     }
 
     public static final class Entry {

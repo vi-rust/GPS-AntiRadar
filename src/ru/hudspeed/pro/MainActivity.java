@@ -549,11 +549,27 @@ public final class MainActivity extends Activity {
         currentVersionParams.setMargins(0, dp(2), 0, dp(16));
         content.addView(currentVersion, currentVersionParams);
 
+        ReleaseHistory.Entry currentRelease = ReleaseHistory.find(BuildConfig.VERSION_NAME);
+        if (currentRelease != null) {
+            TextView currentChangesTitle = text("Изменения текущей версии", 17,
+                    Color.rgb(30, 30, 30), Typeface.BOLD);
+            content.addView(currentChangesTitle, new LinearLayout.LayoutParams(-1, -2));
+
+            TextView currentChanges = text(currentRelease.changes, 14,
+                    Color.rgb(45, 45, 45), Typeface.NORMAL);
+            currentChanges.setLineSpacing(dp(2), 1f);
+            LinearLayout.LayoutParams currentChangesParams =
+                    new LinearLayout.LayoutParams(-1, -2);
+            currentChangesParams.setMargins(0, dp(4), 0, dp(16));
+            content.addView(currentChanges, currentChangesParams);
+        }
+
         TextView historyTitle = text("История релизов", 17,
                 Color.rgb(30, 30, 30), Typeface.BOLD);
         content.addView(historyTitle, new LinearLayout.LayoutParams(-1, -2));
 
         for (ReleaseHistory.Entry release : ReleaseHistory.entries()) {
+            if (BuildConfig.VERSION_NAME.equals(release.version)) continue;
             View divider = new View(this);
             divider.setBackgroundColor(Color.rgb(225, 228, 231));
             LinearLayout.LayoutParams dividerParams =

@@ -207,17 +207,24 @@ public final class ParserGeoTest {
 
     private static void verifyKnownReleaseHistory() {
         List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
-        check(releases.size() == 5, "about dialog contains every known release");
-        check(releases.get(0).version.equals("4.9.1")
-                        && releases.get(1).version.equals("4.9.0")
-                        && releases.get(2).version.equals("4.8.1")
-                        && releases.get(3).version.equals("4.8.0")
-                        && releases.get(4).version.equals("4.7.1"),
+        check(releases.size() == 7, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.3")
+                        && releases.get(1).version.equals("4.9.2")
+                        && releases.get(2).version.equals("4.9.1")
+                        && releases.get(3).version.equals("4.9.0")
+                        && releases.get(4).version.equals("4.8.1")
+                        && releases.get(5).version.equals("4.8.0")
+                        && releases.get(6).version.equals("4.7.1"),
                 "release history is newest first");
         for (ReleaseHistory.Entry release : releases) {
             check(release.changes != null && !release.changes.trim().isEmpty(),
                     "every release has a visible change description");
         }
+        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.3");
+        check(current != null && !current.changes.trim().isEmpty(),
+                "current release has a visible change description");
+        check(ReleaseHistory.find("missing") == null,
+                "unknown release has no fabricated description");
     }
 
     private static void verifyProcessLaunchGuard() {
