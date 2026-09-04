@@ -1,178 +1,178 @@
-# GPS-AntiRadar Android Auto Design
+# Проектирование поддержки Android Auto в GPS-AntiRadar
 
-## Status
+## Статус
 
-Approved in chat on 2026-09-04. This design targets a manually installed build and is not intended for Google Play review.
+Проект утверждён в чате 04.09.2026. Он рассчитан на сборку, устанавливаемую вручную, и не предназначен для проверки в Google Play.
 
-## Goals
+## Цели
 
-1. Hide the phone navigation and status bars while the main activity is in the foreground.
-2. Make GPS-AntiRadar discoverable and launchable from Android Auto.
-3. Reproduce the phone's primary driving view on the car display: Yandex map, database object icons and clusters, current position, speed HUD, nearest object, distance, limit, and alert state.
-4. Expose all existing menu functions on the car display using Android Auto-compatible screens and controls.
-5. Reuse the current tracking, warning, database, and preference behavior without duplicate announcements or divergent settings.
-6. Release and install version 4.9.5 (version code 40), then verify the phone and Android Auto experiences.
+1. Скрывать панель навигации и строку состояния телефона, пока основная Activity находится на переднем плане.
+2. Сделать GPS-AntiRadar доступным для обнаружения и запуска из Android Auto.
+3. Воспроизвести на экране автомобиля основной экран движения с телефона: карту Яндекса, иконки и группы объектов базы данных, текущую позицию, HUD-плашку скорости, ближайший объект, расстояние, ограничение и состояние оповещения.
+4. Предоставить на экране автомобиля все существующие функции меню с помощью экранов и элементов управления, совместимых с Android Auto.
+5. Повторно использовать существующее поведение отслеживания, предупреждений, базы данных и настроек без дублирования оповещений и расхождения параметров.
+6. Выпустить и установить версию 4.9.5 (код версии 40), а затем проверить работу на телефоне и в Android Auto.
 
-## Non-goals
+## Что не входит в задачи
 
-- Google Play approval or compliance review.
-- Turn-by-turn route calculation or destination guidance.
-- Android Automotive OS packaging.
-- Pixel-identical Android Auto system chrome. The host owns its navigation rail and overlays.
-- Mirroring the phone activity. Android Auto receives a dedicated car app service and surface.
+- Одобрение в Google Play или проверка соответствия его требованиям.
+- Расчёт пошагового маршрута или ведение к пункту назначения.
+- Упаковка для Android Automotive OS.
+- Пиксельно идентичное воспроизведение системного интерфейса Android Auto. Панель навигации и перекрывающие элементы принадлежат хосту.
+- Зеркалирование Activity телефона. Android Auto получает отдельный автомобильный сервис и графическую поверхность.
 
-## Platform Decisions
+## Решения по платформе
 
-- Use stable Android for Cars App Library 1.7.0: `androidx.car.app:app:1.7.0` and `androidx.car.app:app-projected:1.7.0`.
-- Declare the templated Android Auto capability and a `CarAppService` in the navigation category.
-- Use `NavigationTemplate` without active turn-by-turn navigation. It provides a full-screen map surface and host-managed action strips.
-- Declare `androidx.car.app.ACCESS_SURFACE` and `androidx.car.app.NAVIGATION_TEMPLATES`.
-- Accept all Android Auto hosts because this is a sideload-only build. This is an explicit distribution trade-off and must be isolated in `GpsCarAppService.createHostValidator()`.
-- Use `VirtualDisplay` and `Presentation` to render Android Views onto the host-provided surface. This is the documented Android Auto mechanism and allows Yandex `MapView` plus the speed HUD to share one rendered hierarchy.
+- Использовать стабильную Android for Cars App Library 1.7.0: `androidx.car.app:app:1.7.0` и `androidx.car.app:app-projected:1.7.0`.
+- Объявить поддержку шаблонов Android Auto и `CarAppService` в категории навигационных приложений.
+- Использовать `NavigationTemplate` без активной пошаговой навигации. Он предоставляет полноэкранную поверхность карты и управляемые хостом панели действий.
+- Объявить `androidx.car.app.ACCESS_SURFACE` и `androidx.car.app.NAVIGATION_TEMPLATES`.
+- Разрешить все хосты Android Auto, поскольку сборка предназначена только для ручной установки. Это осознанный компромисс распространения, который должен быть изолирован в `GpsCarAppService.createHostValidator()`.
+- Использовать `VirtualDisplay` и `Presentation` для вывода Android Views на предоставленную хостом поверхность. Это документированный механизм Android Auto, позволяющий разместить Yandex `MapView` и HUD-плашку скорости в одной иерархии.
 
-## Phone Immersive Mode
+## Иммерсивный режим телефона
 
-`MainActivity` owns a small idempotent `applyImmersiveMode()` method.
+`MainActivity` содержит небольшой идемпотентный метод `applyImmersiveMode()`.
 
-- API 30 and newer: hide `WindowInsets.Type.systemBars()` through `WindowInsetsController`, set `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`, and keep edge-to-edge layout enabled.
-- API 26 through 29: use fullscreen, hide-navigation, layout-stable, layout-hide-navigation, layout-fullscreen, and immersive-sticky system UI flags.
-- Reapply the mode from `onCreate`, `onResume`, and `onWindowFocusChanged(true)` so bars do not remain visible after dialogs, permission screens, or task switching.
-- Overlay padding remains stable and accounts for display cutouts, not the visibility of transient system bars. Showing bars by edge swipe must not shift the map or HUD.
-- Android Auto's own navigation rail is not hidden; it belongs to the host.
+- API 30 и новее: скрыть `WindowInsets.Type.systemBars()` через `WindowInsetsController`, установить `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` и сохранить отображение от края до края.
+- API с 26 по 29: использовать системные флаги полноэкранного режима, скрытия навигации, стабильного макета, макета под панелью навигации, полноэкранного макета и иммерсивного режима `sticky`.
+- Повторно применять режим из `onCreate`, `onResume` и `onWindowFocusChanged(true)`, чтобы панели не оставались видимыми после диалогов, экранов разрешений или переключения задач.
+- Отступы перекрывающего слоя остаются стабильными и учитывают вырезы экрана, а не видимость временных системных панелей. Появление панелей после свайпа от края не должно сдвигать карту или HUD.
+- Собственная панель навигации Android Auto не скрывается: она принадлежит хосту.
 
-## Car Components
+## Автомобильные компоненты
 
 ### GpsCarAppService
 
-- Exported `CarAppService` discovered by Android Auto.
-- Returns an allow-all host validator for sideload operation.
-- Creates one `GpsCarSession` per host session.
+- Экспортируемый `CarAppService`, обнаруживаемый Android Auto.
+- Возвращает валидатор, разрешающий любые хосты при ручной установке.
+- Создаёт один `GpsCarSession` на каждую сессию хоста.
 
 ### GpsCarSession
 
-- Owns the car screen stack and car-scoped lifecycle resources.
-- Checks location permission and the MapKit key when created.
-- Shows a setup message when the phone-side prerequisite is missing.
-- Starts or reuses `TrackingService`; it never creates a second tracking engine.
-- Releases receivers and surface resources when destroyed.
+- Владеет стеком автомобильных экранов и ресурсами жизненного цикла автомобильной сессии.
+- При создании проверяет разрешение геолокации и ключ MapKit.
+- Показывает сообщение о настройке, если на телефоне не выполнено обязательное предварительное действие.
+- Запускает или повторно использует `TrackingService`; второй движок отслеживания не создаётся.
+- При уничтожении освобождает приёмники и ресурсы графической поверхности.
 
 ### CarMapScreen
 
-- Returns a `NavigationTemplate` with an app action strip containing Menu.
-- Adds map actions for zoom in, zoom out, and recenter.
-- Registers a `SurfaceCallback` with `AppManager`.
-- Invalidates only host template state; frequent speed and marker updates are rendered inside the presentation and do not rebuild the screen stack.
+- Возвращает `NavigationTemplate` с панелью действий приложения, содержащей кнопку меню.
+- Добавляет действия карты для увеличения, уменьшения масштаба и возврата к текущей позиции.
+- Регистрирует `SurfaceCallback` в `AppManager`.
+- Инвалидирует только состояние шаблона хоста; частые обновления скорости и маркеров отрисовываются внутри `Presentation` и не перестраивают стек экранов.
 
 ### CarMapPresentation
 
-- Creates a `VirtualDisplay` for each available Android Auto surface and displays a `Presentation` on it.
-- Contains a Yandex `MapView` and a programmatic HUD equivalent to the phone layout.
-- Positions the HUD and critical controls within `onStableAreaChanged`; uses `onVisibleAreaChanged` for temporary host occlusion.
-- Supports light and dark host modes without changing the database icon meanings.
-- Dismisses the presentation and releases the virtual display exactly once when a surface is replaced or destroyed.
+- Создаёт `VirtualDisplay` для каждой доступной поверхности Android Auto и показывает на нём `Presentation`.
+- Содержит Yandex `MapView` и программно сформированную HUD-плашку, соответствующую телефонной.
+- Размещает HUD и критически важные элементы управления внутри области из `onStableAreaChanged`; использует `onVisibleAreaChanged` для временных перекрытий хоста.
+- Поддерживает светлый и тёмный режимы хоста, не меняя смысл иконок базы данных.
+- Ровно один раз закрывает `Presentation` и освобождает виртуальный дисплей при замене или уничтожении поверхности.
 
 ### SharedCameraMapLayer
 
-Extract the reusable camera layer behavior from `MainActivity` behind a class that accepts a Yandex `MapWindow`, Android context, and camera database.
+Вынести повторно используемое поведение слоя камер из `MainActivity` в класс, который принимает Yandex `MapWindow`, Android-контекст и базу камер.
 
-- Resolves the existing `cam_type_*` resources and cluster icons.
-- Queries only the displayed geographic bounds plus the existing 20% buffer.
-- Applies `CameraMarkerDiff` and `MapMarkerEntityDiff` incrementally so retained markers are not recreated.
-- Draws the current-position marker and camera coverage objects.
-- Supports zoom, recentering, follow pause, and resumption.
-- Keeps separate layer instances for phone and car; the two views share behavior and resources, not mutable Yandex map objects.
+- Находит существующие ресурсы `cam_type_*` и иконки групп.
+- Запрашивает только отображаемые географические границы с существующим буфером 20%.
+- Инкрементально применяет `CameraMarkerDiff` и `MapMarkerEntityDiff`, чтобы сохранённые маркеры не создавались заново.
+- Отрисовывает маркер текущей позиции и области действия камер.
+- Поддерживает масштабирование, возврат к позиции, приостановку и возобновление слежения.
+- Хранит отдельные экземпляры слоя для телефона и автомобиля; оба представления используют общее поведение и ресурсы, но не общие изменяемые объекты карты Яндекса.
 
-## Driving State
+## Состояние движения
 
-Introduce an immutable `DrivingSnapshot` containing:
+Добавить неизменяемый `DrivingSnapshot`, содержащий:
 
-- speed;
-- current location;
-- nearest object name and identifier when available;
-- distance;
-- speed limit;
-- activation distance;
-- alert state and algorithm summary.
+- скорость;
+- текущие координаты;
+- название и идентификатор ближайшего объекта, если он доступен;
+- расстояние;
+- ограничение скорости;
+- дистанцию активации;
+- состояние оповещения и сводку алгоритма.
 
-`TrackingService` remains the only owner of GPS scans, camera selection, state transitions, sound playback, and beep repetition. It publishes one package-scoped update intent. Both `MainActivity` and `GpsCarSession` parse that intent into `DrivingSnapshot` and update their own views. Opening both screens therefore cannot duplicate a warning.
+`TrackingService` остаётся единственным владельцем GPS-сканирования, выбора камер, переходов состояний, воспроизведения звука и повторения beep. Он публикует одно адресованное пакету обновление через `Intent`. И `MainActivity`, и `GpsCarSession` преобразуют этот `Intent` в `DrivingSnapshot` и обновляют собственные представления. Поэтому одновременное открытие обоих экранов не дублирует предупреждение.
 
-The car HUD uses the same wording and color rules as the phone HUD. Transparency comes from the shared preference and updates immediately.
+Автомобильная HUD-плашка использует те же формулировки и цветовые правила, что и телефонная. Прозрачность берётся из общей настройки и обновляется немедленно.
 
-## Android Auto Menu
+## Меню Android Auto
 
-The Menu action opens `CarMenuScreen`, backed by the same `SharedPreferences` keys as the phone menu.
+Действие меню открывает `CarMenuScreen`, использующий те же ключи `SharedPreferences`, что и меню телефона.
 
-- **Update database:** starts the shared updater and reports start/current/success/error through `CarToast`.
-- **Alert distance:** a value screen with decrement and increment actions, 300 to 2000 metres in 100-metre steps.
-- **Beep overspeed threshold:** a value screen with decrement and increment actions, 0 to 20 km/h in 1 km/h steps.
-- **HUD transparency:** a value screen with decrement and increment actions, 0% to 80% in 5% steps.
-- **MapKit key:** opens a host text-input screen when input is allowed. If the host blocks input while driving, it instructs the user to change the key on the phone. The stored key and map restart behavior are shared with `MainActivity`.
-- **About:** shows app version, object count, last successful database download, current-version notes, and all known `ReleaseHistory` entries.
-- **Exit:** stops `TrackingService`, closes the car screen stack, and finishes the car app session.
+- **Обновление базы:** запускает общий механизм обновления и сообщает о запуске, актуальности, успехе или ошибке через `CarToast`.
+- **Расстояние оповещения:** экран значения с действиями уменьшения и увеличения от 300 до 2000 метров с шагом 100 метров.
+- **Предел превышения для beep:** экран значения с действиями уменьшения и увеличения от 0 до 20 км/ч с шагом 1 км/ч.
+- **Прозрачность HUD:** экран значения с действиями уменьшения и увеличения от 0% до 80% с шагом 5%.
+- **Ключ MapKit:** открывает предоставленный хостом экран ввода текста, когда ввод разрешён. Если хост блокирует ввод во время движения, приложение предлагает изменить ключ на телефоне. Сохранённый ключ и поведение перезапуска карты общие с `MainActivity`.
+- **О программе:** показывает версию приложения, количество объектов, время последней успешной загрузки базы данных, изменения текущей версии и все известные записи `ReleaseHistory`.
+- **Выход:** останавливает `TrackingService`, закрывает стек автомобильных экранов и завершает автомобильную сессию приложения.
 
-Android Auto has no seek-bar template, so car settings use step controls while preserving the exact phone ranges and stored values.
+В Android Auto нет шаблона ползунка, поэтому автомобильные настройки используют пошаговые элементы управления, сохраняя точные диапазоны и значения телефонной версии.
 
-## Database Update Ownership
+## Владение обновлением базы данных
 
-Move RadarBase networking/import from `MainActivity` into an application-scoped `RadarBaseUpdater`.
+Вынести сеть и импорт RadarBase из `MainActivity` в `RadarBaseUpdater` уровня приложения.
 
-- `GpsAntiRadarApplication` starts one automatic update when the process is created, independent of whether the first entry point is the phone activity or Android Auto.
-- Manual phone and car requests call the same updater.
-- The existing process-wide single-flight guard prevents overlapping downloads/imports.
-- The updater exposes start, unchanged, success, and error states to registered phone/car presenters.
-- HTTP 304 does not change the last-successful timestamp.
-- A successful HTTP 200 download and completed import stores the timestamp before emitting success.
-- Phone presenters use `Toast`; car presenters use `CarToast`.
-- Database replacement emits the existing package-scoped update so both map layers refresh incrementally.
+- `GpsAntiRadarApplication` запускает одно автоматическое обновление при создании процесса независимо от того, первой точкой входа стала Activity телефона или Android Auto.
+- Ручные запросы с телефона и автомобиля вызывают один механизм обновления.
+- Существующий единый процессный ограничитель single-flight предотвращает одновременные загрузки и импорты.
+- Механизм обновления предоставляет зарегистрированным представлениям телефона и автомобиля состояния запуска, актуальности, успеха и ошибки.
+- HTTP 304 не изменяет время последней успешной загрузки.
+- Успешная загрузка HTTP 200 и завершённый импорт сохраняют время до публикации состояния успеха.
+- Представления телефона используют `Toast`, автомобильные представления — `CarToast`.
+- Замена базы данных отправляет существующее адресованное пакету обновление, чтобы оба слоя карты обновились инкрементально.
 
-## Lifecycle And Failure Handling
+## Жизненный цикл и обработка ошибок
 
-- Repeated `onSurfaceAvailable` first releases the previous presentation and virtual display, then creates replacements using the new width, height, and DPI.
-- Surface destruction is idempotent and unregisters Yandex callbacks before releasing display resources.
-- Car session recreation does not restart tracking or database import.
-- A missing MapKit key, failed MapKit initialization, or failed surface creation produces a car message screen. Tracking and audio continue when location permission is available.
-- A missing location permission directs the user to the phone; Android Auto does not attempt to bypass the system permission flow.
-- Database and marker queries remain off the main thread. Results carry generation identifiers so stale viewport results cannot replace newer ones.
-- Closing Android Auto does not stop tracking. Only the explicit Exit action, phone exit action, or removal through Recent Apps stops it.
+- Повторный `onSurfaceAvailable` сначала освобождает предыдущие `Presentation` и виртуальный дисплей, затем создаёт новые с обновлёнными шириной, высотой и DPI.
+- Уничтожение поверхности идемпотентно и отменяет регистрацию обратных вызовов Яндекс-карты до освобождения ресурсов дисплея.
+- Пересоздание автомобильной сессии не перезапускает отслеживание или импорт базы данных.
+- Отсутствующий ключ MapKit, ошибка инициализации MapKit или создания поверхности приводят к показу сообщения на автомобильном экране. Отслеживание и звук продолжаются, если разрешена геолокация.
+- При отсутствии разрешения геолокации пользователь направляется к телефону; Android Auto не пытается обойти системный процесс выдачи разрешений.
+- Запросы к базе данных и маркерам выполняются вне главного потока. Результаты содержат номера поколений, поэтому устаревший результат окна просмотра не может заменить более новый.
+- Закрытие Android Auto не останавливает отслеживание. Его останавливает только явное действие «Выход», выход на телефоне или удаление приложения из Recent Apps.
 
-## Manifest And Resources
+## Манифест и ресурсы
 
-- Add the Android Auto template descriptor under `res/xml/automotive_app_desc.xml`.
-- Add the Car App API level metadata required by library 1.7.0.
-- Declare `GpsCarAppService`, surface/template permissions, and navigation category.
-- Reuse existing camera and command icons; add monochrome car action icons only where Android Auto requires host tinting.
-- Keep phone orientation landscape. The car presentation derives all dimensions from the supplied surface and stable area.
+- Добавить дескриптор шаблона Android Auto в `res/xml/automotive_app_desc.xml`.
+- Добавить метаданные уровня Car App API, требуемые библиотекой 1.7.0.
+- Объявить `GpsCarAppService`, разрешения поверхности и шаблона, а также категорию навигации.
+- Повторно использовать существующие иконки камер и команд; добавлять монохромные иконки автомобильных действий только там, где Android Auto требует окрашивания хостом.
+- Сохранить альбомную ориентацию телефона. Автомобильное `Presentation` получает все размеры из предоставленной поверхности и безопасной области.
 
-## Testing
+## Тестирование
 
-Development follows test-first red/green cycles.
+Разработка выполняется циклами «сначала тест»: красный — зелёный.
 
-### Automated
+### Автоматические проверки
 
-- Pure JVM tests for `DrivingSnapshot`, setting bounds/steps, menu state, and surface lifecycle state transitions.
-- Existing parser, alert algorithm, tracker, viewport diff, and release-history tests remain green.
-- Source/manifest contract tests verify Android Auto metadata, service category, surface permissions, stable Car App Library version, immersive-mode reapplication, and version 4.9.5 (40).
-- Car App Library test helpers verify root template creation, menu navigation, actions, and shared setting changes where supported by the local toolchain.
-- `git diff --check`, release compilation, lint vital, and APK signing validation must pass.
+- Чистые JVM-тесты для `DrivingSnapshot`, границ и шагов настроек, состояния меню и переходов жизненного цикла поверхности.
+- Существующие тесты парсера, алгоритма оповещения, трекера, diff окна просмотра и истории версий должны оставаться зелёными.
+- Контрактные тесты исходного кода и манифеста проверяют метаданные Android Auto, категорию сервиса, разрешения поверхности, стабильную версию Car App Library, повторное применение иммерсивного режима и версию 4.9.5 (40).
+- Вспомогательные средства тестирования Car App Library проверяют создание корневого шаблона, навигацию по меню, действия и изменения общих настроек там, где это поддерживает локальный набор инструментов.
+- Должны успешно завершаться `git diff --check`, компиляция релиза, `lint vital` и проверка подписи APK.
 
-### Device And DHU
+### Телефон и DHU
 
-- Install the release APK on the connected phone without clearing its data.
-- Verify the phone navigation/status bars are hidden after cold launch, after closing a dialog, and after returning from Recent Apps; an edge swipe temporarily reveals them.
-- Enable Android Auto developer mode and unknown sources on the phone.
-- Run Android Auto Desktop Head Unit and verify app discovery, cold launch, map tiles, existing camera icons/clusters, HUD updates, zoom, recenter, all menu actions, About, database status, and Exit.
-- Disconnect/reconnect DHU and rotate or resize its surface to exercise surface replacement.
-- Check the application PID log for fatal exceptions after phone and DHU scenarios.
+- Установить релизный APK на подключённый телефон без удаления его данных.
+- Проверить, что панели навигации и состояния телефона скрыты после холодного запуска, после закрытия диалога и после возврата из Recent Apps; свайп от края временно показывает их.
+- Включить на телефоне режим разработчика Android Auto и неизвестные источники.
+- Запустить Android Auto Desktop Head Unit и проверить обнаружение приложения, холодный запуск, тайлы карты, существующие иконки и группы камер, обновления HUD, масштабирование, возврат к позиции, все действия меню, окно «О программе», состояние базы данных и выход.
+- Отключить и повторно подключить DHU, повернуть или изменить размер его поверхности, чтобы проверить замену поверхности.
+- После сценариев телефона и DHU проверить журнал PID приложения на фатальные исключения.
 
-## Release
+## Релиз
 
-- Add a non-empty known-release entry for 4.9.5 describing immersive mode and Android Auto support.
-- Set `versionName` to `4.9.5` and `versionCode` to `40`.
-- Build `outputs/GPS-AntiRadar.apk`, report its SHA-256 and size, install it on the connected phone, and confirm installed package metadata.
+- Добавить непустую запись известной версии 4.9.5 с описанием иммерсивного режима и поддержки Android Auto.
+- Установить `versionName` в `4.9.5`, а `versionCode` — в `40`.
+- Собрать `outputs/GPS-AntiRadar.apk`, сообщить его SHA-256 и размер, установить на подключённый телефон и подтвердить метаданные установленного пакета.
 
-## Accepted Limitations
+## Принятые ограничения
 
-- This sideload build may stop appearing if a future Android Auto release removes developer-mode unknown-source support.
-- The host can cover parts of the surface with its own UI and can restrict text entry while driving.
-- The Android Auto experience is visually equivalent to the phone's driving view but cannot remove or restyle Android Auto system chrome.
-- The app declares a navigation category to obtain a map surface but intentionally does not provide route guidance; this is unsuitable for Google Play review.
+- Эта устанавливаемая вручную сборка может перестать отображаться, если будущая версия Android Auto удалит поддержку неизвестных источников в режиме разработчика.
+- Хост может перекрывать части поверхности собственным интерфейсом и ограничивать ввод текста во время движения.
+- Интерфейс Android Auto визуально соответствует экрану движения телефона, но не может удалить или изменить системный интерфейс Android Auto.
+- Приложение объявляет категорию навигации для получения поверхности карты, но намеренно не выполняет ведение по маршруту; оно не подходит для проверки в Google Play.

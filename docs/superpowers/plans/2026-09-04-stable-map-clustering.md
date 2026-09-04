@@ -1,45 +1,45 @@
-# Stable Map Clustering Implementation Plan
+# План реализации стабильной кластеризации карты
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
+> **Для агентов-разработчиков:** ОБЯЗАТЕЛЬНЫЙ ДОПОЛНИТЕЛЬНЫЙ НАВЫК: для пошагового выполнения этого плана используйте superpowers:subagent-driven-development (рекомендуется) или superpowers:executing-plans. Для отслеживания в шагах используется синтаксис флажков (- [ ]).
 
-**Goal:** Preserve existing individual and grouped map icons while changing only entities affected by viewport and zoom changes.
+**Цель:** сохранить существующие одиночные и групповые иконки карты, изменяя только сущности, затронутые изменением окна просмотра и масштаба.
 
-**Architecture:** Replace MapKit full-collection clustering with a deterministic Web Mercator layout and an entity diff. MainActivity applies the diff to one persistent ordinary MapObjectCollection; coverage polygons and the existing 20% SQLite query buffer stay independent.
+**Архитектура:** заменить кластеризацию всей коллекции MapKit детерминированной компоновкой Web Mercator и diff сущностей. `MainActivity` применяет diff к одной постоянной обычной `MapObjectCollection`; полигоны областей действия и существующий 20-процентный буфер SQLite-запроса остаются независимыми.
 
-**Tech Stack:** Java 8, Android SDK 36, Yandex MapKit 4.42 Lite, PowerShell/JVM test harness.
+**Технологии:** Java 8, Android SDK 36, Yandex MapKit 4.42 Lite, среда тестирования PowerShell/JVM.
 
-**Spec:** docs/superpowers/specs/2026-09-04-stable-map-clustering-design.md
+**Спецификация:** docs/superpowers/specs/2026-09-04-stable-map-clustering-design.md
 
-## Global Constraints
+## Общие ограничения
 
-- Preserve the existing 20% padded SQLite query bounds.
-- Use individual markers at zoom 14 and above.
-- Use a world-anchored 52-pixel Web Mercator grid below zoom 14.
-- Never mutate unchanged MapKit entities.
-- A changed cluster may update; unrelated entities remain untouched.
-- Keep coverage polygons and the GPS marker independent.
-- Skip invalid coordinates.
-- Release 4.9.3 shows its own description in About.
-- Preserve all pre-existing uncommitted user changes.
+- Сохранить существующие границы SQLite-запроса с буфером 20%.
+- Использовать отдельные маркеры при масштабе 14 и выше.
+- При масштабе ниже 14 использовать привязанную к мировым координатам сетку Web Mercator с ячейкой 52 пикселя.
+- Никогда не изменять неизменившиеся сущности MapKit.
+- Изменившуюся группу можно обновить; несвязанные сущности должны остаться нетронутыми.
+- Сохранить независимость полигонов областей действия и GPS-маркера.
+- Пропускать некорректные координаты.
+- Версия 4.9.3 показывает собственное описание в окне «О программе».
+- Сохранить все существующие незакоммиченные изменения пользователя.
 
 ---
 
-### Task 1: Deterministic Marker Layout
+### Задача 1: детерминированная компоновка маркеров
 
-**Files:**
-- Create: src/ru/hudspeed/pro/MapMarkerLayout.java
-- Modify: test.ps1
-- Modify: tests/ParserGeoTest.java
+**Файлы:**
+- Создать: src/ru/hudspeed/pro/MapMarkerLayout.java
+- Изменить: test.ps1
+- Изменить: tests/ParserGeoTest.java
 
-**Interfaces:**
-- Consumes CameraPoint records and float zoom.
-- Produces MapMarkerLayout.create(List<CameraPoint>, float).
-- Produces immutable Entity fields key, cluster, latitude, longitude, memberIds, camera.
-- Produces Entity.samePresentation(Entity).
+**Интерфейсы:**
+- Принимает записи `CameraPoint` и масштаб `float`.
+- Возвращает результат `MapMarkerLayout.create(List<CameraPoint>, float)`.
+- Возвращает неизменяемые поля `Entity`: `key`, `cluster`, `latitude`, `longitude`, `memberIds`, `camera`.
+- Предоставляет `Entity.samePresentation(Entity)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Шаг 1: написать падающие тесты**
 
-Add MapMarkerLayout.java to test.ps1 and add:
+Добавить `MapMarkerLayout.java` в `test.ps1` и следующий код:
 
 ~~~java
 private static void verifyStableMapMarkerLayout() {
@@ -68,15 +68,15 @@ private static void verifyStableMapMarkerLayout() {
 }
 ~~~
 
-This catches unstable keys, a wrong zoom threshold, and invalid coordinate handling.
+Этот тест выявляет нестабильные ключи, неверный порог масштаба и неправильную обработку координат.
 
-- [ ] **Step 2: Verify RED**
+- [ ] **Шаг 2: проверить RED**
 
-Run .\test.ps1. Expected: compilation fails because MapMarkerLayout is absent.
+Запустить `.\test.ps1`. Ожидаемый результат: компиляция завершается ошибкой, потому что `MapMarkerLayout` отсутствует.
 
-- [ ] **Step 3: Implement MapMarkerLayout**
+- [ ] **Шаг 3: реализовать MapMarkerLayout**
 
-Use the exact coordinate model:
+Использовать точную модель координат:
 
 ~~~java
 static final float INDIVIDUAL_ZOOM = 14f;
@@ -92,19 +92,15 @@ long cellX = (long) Math.floor(x * worldSize / CELL_PIXELS);
 long cellY = (long) Math.floor(y * worldSize / CELL_PIXELS);
 ~~~
 
-Reject non-finite or out-of-range coordinates. At zoom 14 and above return
-camera:<id>. Below zoom 14, group in a TreeMap keyed
-cluster:<floorZoom>:<cellX>:<cellY>. A one-member cell remains individual.
-Sort member IDs and use the geographic centroid. Individual equality includes
-every CameraPoint field used by map presentation.
+Отклонять неконечные или выходящие за допустимый диапазон координаты. При масштабе 14 и выше возвращать `camera:<id>`. При масштабе ниже 14 группировать в `TreeMap` по ключу `cluster:<floorZoom>:<cellX>:<cellY>`. Ячейка с одним участником остаётся одиночным объектом. Сортировать идентификаторы участников и использовать географический центроид. Сравнение одиночных объектов включает каждое поле `CameraPoint`, используемое при отображении на карте.
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **Шаг 4: проверить GREEN**
 
-Run .\test.ps1. Expected: ParserGeoTest: OK.
+Запустить `.\test.ps1`. Ожидаемый результат: `ParserGeoTest: OK`.
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Шаг 5: проверить изменения и создать коммит**
 
-Inspect staged tests because they contain earlier approved work.
+Проверить подготовленные тесты, поскольку они содержат ранее утверждённую работу.
 
 ~~~powershell
 git add src/ru/hudspeed/pro/MapMarkerLayout.java test.ps1 tests/ParserGeoTest.java
@@ -113,20 +109,20 @@ git commit -m "feat: add stable map marker layout"
 
 ---
 
-### Task 2: Entity Diff
+### Задача 2: diff сущностей
 
-**Files:**
-- Create: src/ru/hudspeed/pro/MapMarkerEntityDiff.java
-- Modify: test.ps1
-- Modify: tests/ParserGeoTest.java
+**Файлы:**
+- Создать: src/ru/hudspeed/pro/MapMarkerEntityDiff.java
+- Изменить: test.ps1
+- Изменить: tests/ParserGeoTest.java
 
-**Interfaces:**
-- Consumes rendered Map<String, MapMarkerLayout.Entity> and desired entities.
-- Produces Result fields removeKeys, add, update, desired.
+**Интерфейсы:**
+- Принимает отрисованную `Map<String, MapMarkerLayout.Entity>` и требуемые сущности.
+- Возвращает поля `Result`: `removeKeys`, `add`, `update`, `desired`.
 
-- [ ] **Step 1: Write the failing localized-change tests**
+- [ ] **Шаг 1: написать падающие тесты локального изменения**
 
-Build two clusters from Task 1, add camera 405 near camera 401, then:
+Создать две группы из задачи 1, добавить камеру 405 рядом с камерой 401, затем выполнить:
 
 ~~~java
 Map<String, MapMarkerLayout.Entity> rendered = entitiesByKey(
@@ -141,14 +137,13 @@ check(diff.update.get(0).memberIds.contains(405L),
         "updated cluster contains the entering camera");
 ~~~
 
-Assert the Yekaterinburg cluster is absent from update. At zoom 14, moving camera
-401 must produce one update and no add/remove.
+Проверить, что группа Екатеринбурга отсутствует в `update`. При масштабе 14 перемещение камеры 401 должно приводить к одному обновлению без добавлений и удалений.
 
-- [ ] **Step 2: Verify RED**
+- [ ] **Шаг 2: проверить RED**
 
-Run .\test.ps1. Expected: compilation fails because MapMarkerEntityDiff is absent.
+Запустить `.\test.ps1`. Ожидаемый результат: компиляция завершается ошибкой, потому что `MapMarkerEntityDiff` отсутствует.
 
-- [ ] **Step 3: Implement MapMarkerEntityDiff**
+- [ ] **Шаг 3: реализовать MapMarkerEntityDiff**
 
 ~~~java
 public static Result between(
@@ -162,13 +157,13 @@ public static Result between(
 }
 ~~~
 
-Update stays separate from remove-plus-add so its PlacemarkMapObject survives.
+`update` остаётся отдельным от удаления с последующим добавлением, чтобы его `PlacemarkMapObject` сохранялся.
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **Шаг 4: проверить GREEN**
 
-Run .\test.ps1. Expected: ParserGeoTest: OK.
+Запустить `.\test.ps1`. Ожидаемый результат: `ParserGeoTest: OK`.
 
-- [ ] **Step 5: Review and commit**
+- [ ] **Шаг 5: проверить изменения и создать коммит**
 
 ~~~powershell
 git add src/ru/hudspeed/pro/MapMarkerEntityDiff.java test.ps1 tests/ParserGeoTest.java
@@ -177,24 +172,23 @@ git commit -m "feat: diff stable map entities"
 
 ---
 
-### Task 3: Persistent MapKit Rendering
+### Задача 3: постоянная отрисовка MapKit
 
-**Files:**
-- Modify: src/ru/hudspeed/pro/MainActivity.java
+**Файлы:**
+- Изменить: src/ru/hudspeed/pro/MainActivity.java
 
-**Interfaces:**
-- Consumes MapMarkerLayout.create(points, zoom).
-- Consumes MapMarkerEntityDiff.between(rendered, desired).
-- Maintains renderedMarkerObjects and renderedMarkerEntities keyed by String.
+**Интерфейсы:**
+- Использует `MapMarkerLayout.create(points, zoom)`.
+- Использует `MapMarkerEntityDiff.between(rendered, desired)`.
+- Хранит `renderedMarkerObjects` и `renderedMarkerEntities` с ключом типа `String`.
 
-- [ ] **Step 1: Confirm the failing behavior**
+- [ ] **Шаг 1: подтвердить ошибочное поведение**
 
-Confirm renderCameraMarkers calls cameraMarkerCollection.clusterPlacemarks()
-whenever any camera enters or leaves. This global cluster rebuild is the defect.
+Подтвердить, что `renderCameraMarkers` вызывает `cameraMarkerCollection.clusterPlacemarks()` при каждом появлении или исчезновении камеры. Этот дефект приводит к глобальному перестроению групп.
 
-- [ ] **Step 2: Replace clustered collection state**
+- [ ] **Шаг 2: заменить состояние кластеризованной коллекции**
 
-Remove Cluster, ClusterListener, and ClusterizedPlacemarkCollection. Add:
+Удалить `Cluster`, `ClusterListener` и `ClusterizedPlacemarkCollection`. Добавить:
 
 ~~~java
 private MapObjectCollection cameraMarkerCollection;
@@ -205,12 +199,11 @@ private final Map<String, MapMarkerLayout.Entity> renderedMarkerEntities =
 private final Map<Integer, ImageProvider> clusterIcons = new HashMap<>();
 ~~~
 
-Create cameraMarkerCollection with map.getMapObjects().addCollection(). Never
-clear the root map collection.
+Создать `cameraMarkerCollection` через `map.getMapObjects().addCollection()`. Никогда не очищать корневую коллекцию карты.
 
-- [ ] **Step 3: Apply only diff operations**
+- [ ] **Шаг 3: применять только операции diff**
 
-Keep CameraMarkerDiff only for coverage polygons. Compute:
+Сохранить `CameraMarkerDiff` только для полигонов областей действия. Вычислить:
 
 ~~~java
 List<MapMarkerLayout.Entity> entities =
@@ -219,11 +212,9 @@ MapMarkerEntityDiff.Result markerDiff =
         MapMarkerEntityDiff.between(renderedMarkerEntities, entities);
 ~~~
 
-Remove only removeKeys. For update, retain the existing PlacemarkMapObject and
-change only differing properties. Add only add. Store markerDiff.desired after
-successful application. Remove every marker clear() and clusterPlacemarks().
+Удалять только `removeKeys`. Для `update` сохранять существующий `PlacemarkMapObject` и изменять только отличающиеся свойства. Добавлять только `add`. После успешного применения сохранить `markerDiff.desired`. Удалить все вызовы `clear()` для маркеров и все вызовы `clusterPlacemarks()`.
 
-- [ ] **Step 4: Add exact helpers**
+- [ ] **Шаг 4: добавить точные вспомогательные методы**
 
 ~~~java
 private PlacemarkMapObject addMarkerEntity(MapMarkerLayout.Entity entity)
@@ -234,16 +225,13 @@ private IconStyle clusterMarkerStyle()
 private ImageProvider clusterIcon(int count)
 ~~~
 
-Clusters use cached createClusterIcon(count), no rotation, z-index 20, and no
-tap listener. Individuals reuse iconForCamera(), shootingBearing(), user data,
-and the camera tap listener. Unchanged entities receive no MapKit calls.
+Группы используют кэшированный `createClusterIcon(count)`, не имеют поворота и обработчика нажатия, их `z-index` равен 20. Одиночные объекты повторно используют `iconForCamera()`, `shootingBearing()`, пользовательские данные и обработчик нажатия камеры. Для неизменившихся сущностей не выполняются вызовы MapKit.
 
-- [ ] **Step 5: Preserve coverage**
+- [ ] **Шаг 5: сохранить области действия**
 
-Coverage remains visible at zoom >= COVERAGE_MIN_ZOOM. Threshold changes may
-clear only cameraCoverageCollection and cannot mutate markers or the GPS object.
+Области действия остаются видимыми при масштабе не ниже `COVERAGE_MIN_ZOOM`. Изменение порога может очищать только `cameraCoverageCollection` и не может изменять маркеры или GPS-объект.
 
-- [ ] **Step 6: Verify and audit**
+- [ ] **Шаг 6: проверить и выполнить аудит**
 
 ~~~powershell
 .\test.ps1
@@ -252,12 +240,11 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 .\gradlew.bat --no-daemon compileReleaseJavaWithJavac
 ~~~
 
-Expected: ParserGeoTest: OK and BUILD SUCCESSFUL. Confirm no clusterPlacemarks,
-no marker collection clear, and isolated coverage clearing.
+Ожидаемый результат: `ParserGeoTest: OK` и `BUILD SUCCESSFUL`. Подтвердить отсутствие `clusterPlacemarks`, очистки коллекции маркеров и наличие изолированной очистки областей действия.
 
-- [ ] **Step 7: Review and commit**
+- [ ] **Шаг 7: проверить изменения и создать коммит**
 
-MainActivity contains earlier approved work; preserve it intact.
+`MainActivity` содержит ранее утверждённую работу; сохранить её без изменений.
 
 ~~~powershell
 git add src/ru/hudspeed/pro/MainActivity.java
@@ -266,20 +253,20 @@ git commit -m "fix: preserve unchanged map markers"
 
 ---
 
-### Task 4: Current Release Description
+### Задача 4: описание текущей версии
 
-**Files:**
-- Modify: src/ru/hudspeed/pro/ReleaseHistory.java
-- Modify: src/ru/hudspeed/pro/MainActivity.java
-- Modify: tests/ParserGeoTest.java
-- Modify: build.gradle
-- Modify: README.md
+**Файлы:**
+- Изменить: src/ru/hudspeed/pro/ReleaseHistory.java
+- Изменить: src/ru/hudspeed/pro/MainActivity.java
+- Изменить: tests/ParserGeoTest.java
+- Изменить: build.gradle
+- Изменить: README.md
 
-**Interfaces:**
-- Produces ReleaseHistory.find(String), returning Entry or null.
-- Consumes BuildConfig.VERSION_NAME in showAboutDialog().
+**Интерфейсы:**
+- Предоставляет `ReleaseHistory.find(String)`, возвращающий `Entry` или `null`.
+- Использует `BuildConfig.VERSION_NAME` в `showAboutDialog()`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Шаг 1: написать падающие тесты**
 
 ~~~java
 ReleaseHistory.Entry current = ReleaseHistory.find("4.9.3");
@@ -289,13 +276,13 @@ check(ReleaseHistory.find("missing") == null,
         "unknown release has no fabricated description");
 ~~~
 
-Expect versions 4.9.3, 4.9.2, 4.9.1, 4.9.0, 4.8.1, 4.8.0, 4.7.1.
+Ожидаются версии 4.9.3, 4.9.2, 4.9.1, 4.9.0, 4.8.1, 4.8.0, 4.7.1.
 
-- [ ] **Step 2: Verify RED**
+- [ ] **Шаг 2: проверить RED**
 
-Run .\test.ps1. Expected: missing find() or missing 4.9.3.
+Запустить `.\test.ps1`. Ожидаемый результат: отсутствует `find()` или запись 4.9.3.
 
-- [ ] **Step 3: Add entries and lookup**
+- [ ] **Шаг 3: добавить записи и поиск**
 
 ~~~java
 new Entry("4.9.3", "Устранено моргание значков: неизменившиеся одиночные "
@@ -304,17 +291,15 @@ new Entry("4.9.2", "Добавлена автоматическая провер
         + "запуске и дифференциальное обновление объектов карты с 20% буфером."),
 ~~~
 
-Implement find(String) by iterating the immutable list.
+Реализовать `find(String)` перебором неизменяемого списка.
 
-- [ ] **Step 4: Show current changes without duplication**
+- [ ] **Шаг 4: показать изменения текущей версии без дублирования**
 
-Below the current version show Изменения текущей версии and the matching
-description. Skip that version in the older release loop.
+Под текущей версией показать заголовок «Изменения текущей версии» и соответствующее описание. Пропустить эту версию в цикле старых выпусков.
 
-- [ ] **Step 5: Bump, document, verify, and commit**
+- [ ] **Шаг 5: изменить версию, обновить документацию, проверить и создать коммит**
 
-Set versionCode 38 and versionName 4.9.3. Update README to describe stable
-custom clustering. Run .\test.ps1 and expect ParserGeoTest: OK.
+Установить `versionCode` в 38, а `versionName` — в 4.9.3. Обновить README описанием стабильной пользовательской кластеризации. Запустить `.\test.ps1` и ожидать `ParserGeoTest: OK`.
 
 ~~~powershell
 git add src/ru/hudspeed/pro/ReleaseHistory.java src/ru/hudspeed/pro/MainActivity.java tests/ParserGeoTest.java build.gradle README.md
@@ -323,15 +308,15 @@ git commit -m "feat: document release 4.9.3"
 
 ---
 
-### Task 5: Release and Device Verification
+### Задача 5: релиз и проверка на устройстве
 
-**Files:**
-- Generate: outputs/GPS-AntiRadar.apk
+**Файлы:**
+- Создать: outputs/GPS-AntiRadar.apk
 
-**Interfaces:**
-- Produces ru.gpsantiradar.app version 4.9.3.
+**Интерфейсы:**
+- Создаёт `ru.gpsantiradar.app` версии 4.9.3.
 
-- [ ] **Step 1: Run complete verification**
+- [ ] **Шаг 1: выполнить полную проверку**
 
 ~~~powershell
 .\test.ps1
@@ -339,32 +324,25 @@ git diff --check
 .\build.ps1
 ~~~
 
-Expected: ParserGeoTest: OK, no whitespace errors, BUILD SUCCESSFUL.
+Ожидаемый результат: `ParserGeoTest: OK`, отсутствие ошибок пробелов и `BUILD SUCCESSFUL`.
 
-- [ ] **Step 2: Install without clearing data**
+- [ ] **Шаг 2: установить без удаления данных**
 
 ~~~powershell
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 & $adb install -r "outputs\GPS-AntiRadar.apk"
 ~~~
 
-Expected: Success.
+Ожидаемый результат: `Success`.
 
-- [ ] **Step 3: Exercise rendering**
+- [ ] **Шаг 3: проверить отрисовку**
 
-Cold-start the Activity. At a location containing groups and individuals,
-perform repeated zoom and pan gestures and let new buffered objects enter.
-Record the screen during the gestures and inspect frames for disappearance of
-unaffected icons. Confirm the Activity remains focused and AndroidRuntime has no
-errors. The JVM entity-diff test provides the deterministic assertion that
-unchanged keys produce no MapKit operation.
+Холодным запуском открыть Activity. В месте, содержащем группы и одиночные объекты, несколько раз изменить масштаб и прокрутить карту, позволяя новым объектам из области с буфером появляться на экране. Записать экран во время действий и проверить кадры на исчезновение незатронутых иконок. Подтвердить, что Activity остаётся в фокусе, а в `AndroidRuntime` нет ошибок. JVM-тест diff сущностей предоставляет детерминированную проверку того, что неизменившиеся ключи не приводят к операциям MapKit.
 
-- [ ] **Step 4: Verify About and package**
+- [ ] **Шаг 4: проверить окно «О программе» и пакет**
 
-UI Automator contains Версия 4.9.3, Изменения текущей версии, its description,
-and historical Версия 4.9.2. dumpsys package reports versionCode=38 and
-versionName=4.9.3.
+`UI Automator` содержит «Версия 4.9.3», «Изменения текущей версии», соответствующее описание и историческую запись «Версия 4.9.2». `dumpsys package` сообщает `versionCode=38` и `versionName=4.9.3`.
 
-- [ ] **Step 5: Record artifact**
+- [ ] **Шаг 5: зафиксировать артефакт**
 
-Report the absolute APK path, byte size, and SHA-256.
+Сообщить абсолютный путь к APK, размер в байтах и SHA-256.
