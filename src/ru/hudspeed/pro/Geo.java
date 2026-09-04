@@ -29,6 +29,13 @@ public final class Geo {
         return d > 180f ? 360f - d : d;
     }
 
+    public static float angleDifferenceSigned(float first, float second) {
+        float difference = (second - first) % 360f;
+        if (difference > 180f) difference -= 360f;
+        if (difference < -180f) difference += 360f;
+        return difference;
+    }
+
     public static float normalize(float angle) {
         float result = angle % 360f;
         return result < 0 ? result + 360f : result;

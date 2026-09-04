@@ -19,11 +19,9 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 public final class TrackingService extends Service implements LocationListener {
     public static final String ACTION_START = "ru.gpsantiradar.app.START";
@@ -47,7 +45,10 @@ public final class TrackingService extends Service implements LocationListener {
     private StrelkaSoundPlayer soundPlayer;
     private TextToSpeech tts;
     private Location previousGps;
-    private final Map<Long, ActiveAlert> activeAlerts = new HashMap<>();
+    private Location lastRadarScan;
+    private float radarHeading = Float.NaN;
+    private final StrelkaAlertTracker alertTracker = new StrelkaAlertTracker();
+    private long lastRadarFixElapsed;
     private long alertedCameraId = -1;
     private boolean finalWarning;
     private long alertedRoadObjectId = -1;
@@ -204,47 +205,81 @@ public final class TrackingService extends Service implements LocationListener {
 
         float speedKmh = speed(location);
         float heading = heading(location);
+        double movementSinceScan = lastRadarScan == null ? Double.MAX_VALUE
+                : Geo.distanceMeters(lastRadarScan.getLatitude(), lastRadarScan.getLongitude(),
+                location.getLatitude(), location.getLongitude());
+        float requiredMovement = location.hasAccuracy()
+                ? Math.max(3f, location.getAccuracy()) : 3f;
+        boolean scanPerformed = requiredMovement < 60f
+                && movementSinceScan > requiredMovement;
+        if (scanPerformed && lastRadarScan != null) {
+            float measuredHeading = Geo.bearing(lastRadarScan.getLatitude(),
+                    lastRadarScan.getLongitude(), location.getLatitude(),
+                    location.getLongitude());
+            radarHeading = Float.isNaN(radarHeading) ? measuredHeading
+                    : averageHeading(radarHeading, measuredHeading);
+            heading = radarHeading;
+        } else if (!Float.isNaN(radarHeading)) {
+            heading = radarHeading;
+        }
         int fallbackAlertDistance = getSharedPreferences("settings", MODE_PRIVATE)
                 .getInt("alert_distance", 800);
         long now = SystemClock.elapsedRealtime();
+        boolean gpsRecovered = lastRadarFixElapsed > 0
+                && now - lastRadarFixElapsed > 5000L;
+        lastRadarFixElapsed = now;
         CameraPoint nearest = null;
         double nearestDistance = Double.MAX_VALUE;
         int nearestAlertDistance = 0;
 
-        for (ActiveAlert state : activeAlerts.values()) state.current = false;
+        List<StrelkaAlertTracker.Observation> observations = new ArrayList<>();
         List<CameraPoint> candidates = database.nearby(location.getLatitude(),
-                location.getLongitude(), 5000);
+                location.getLongitude(), StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS);
         for (CameraPoint object : candidates) {
             double distance = Geo.distanceMeters(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
-            if (distance > 5000) continue;
+            if (distance > StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS) continue;
             float bearing = Geo.bearing(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
-            if (!StrelkaAlertAlgorithm.matchesApproach(
-                    object, speedKmh, distance, heading, bearing)) continue;
-
             int alertDistance = StrelkaAlertAlgorithm.activationDistance(
                     object, fallbackAlertDistance);
-            if (distance < nearestDistance) {
+            boolean matchesZone = StrelkaAlertAlgorithm.matchesZone(object, distance,
+                    heading, bearing, fallbackAlertDistance);
+            boolean dropImmediately = StrelkaAlertAlgorithm.mustDropImmediately(
+                    object, speedKmh, distance, heading, bearing);
+            observations.add(new StrelkaAlertTracker.Observation(object,
+                    (int) Math.round(distance), alertDistance,
+                    matchesZone, dropImmediately));
+
+            boolean relevant = !dropImmediately && (matchesZone
+                    || StrelkaAlertAlgorithm.matchesDirectionForAcquisition(
+                    object, heading));
+            if (relevant && distance < nearestDistance) {
                 nearest = object;
                 nearestDistance = distance;
                 nearestAlertDistance = alertDistance;
             }
-            if (distance > alertDistance) continue;
-
-            ActiveAlert state = activeAlerts.get(object.id);
-            if (state == null) {
-                state = new ActiveAlert(object, alertDistance);
-                activeAlerts.put(object.id, state);
-            }
-            state.current = true;
-            state.lastDistance = (int) Math.round(distance);
-            state.lastSeenElapsed = now;
         }
 
-        updateActiveAlerts(now);
-        AlertSelection selection = selectActiveAlerts();
-        String alertState = runAlertSequence(selection, speedKmh, now,
+        StrelkaAlertTracker.Update alertUpdate;
+        if (scanPerformed) {
+            alertUpdate = alertTracker.update(observations, speedKmh, gpsRecovered);
+            lastRadarScan = new Location(location);
+        } else {
+            alertUpdate = alertTracker.snapshot();
+        }
+        CameraPoint finishedObject = null;
+        for (StrelkaAlertTracker.State exited : alertUpdate.exited) {
+            if (exited.spoken) {
+                finishedObject = exited.object;
+                break;
+            }
+        }
+        if (finishedObject != null && alertUpdate.activeCount == 0) {
+            soundPlayer.objectFinished(finishedObject);
+        }
+
+        String alertState = runAlertSequence(alertUpdate, speedKmh, scanPerformed,
                 nearest, nearestDistance, nearestAlertDistance);
         sendUpdate(location, speedKmh, nearest, nearestDistance,
                 nearestAlertDistance, alertState);
@@ -263,61 +298,40 @@ public final class TrackingService extends Service implements LocationListener {
                 && Geo.angleDifference(vehicleHeading, camera.direction + 180f) <= 70;
     }
 
-    private void updateActiveAlerts(long now) {
-        Iterator<ActiveAlert> iterator = activeAlerts.values().iterator();
-        while (iterator.hasNext()) {
-            ActiveAlert state = iterator.next();
-            if (!state.current && now - state.lastSeenElapsed > 3000L) {
-                if (state.spoken) soundPlayer.objectFinished(state.object);
-                iterator.remove();
-            }
-        }
-    }
-
-    private AlertSelection selectActiveAlerts() {
-        ActiveAlert closest = null;
-        ActiveAlert pendingVoice = null;
-        int count = 0;
-        for (ActiveAlert state : activeAlerts.values()) {
-            if (!state.current) continue;
-            count++;
-            if (closest == null || state.lastDistance < closest.lastDistance) {
-                closest = state;
-            }
-            if (!state.spoken && (pendingVoice == null
-                    || state.lastDistance < pendingVoice.lastDistance)) {
-                pendingVoice = state;
-            }
-        }
-        return new AlertSelection(closest, pendingVoice, count);
-    }
-
-    private String runAlertSequence(AlertSelection selection, float speedKmh, long now,
+    private String runAlertSequence(StrelkaAlertTracker.Update update, float speedKmh,
+                                    boolean scanPerformed,
                                     CameraPoint nearest, double nearestDistance,
                                     int nearestAlertDistance) {
-        ActiveAlert pending = selection.pendingVoice;
-        if (speedKmh >= 3 && pending != null) {
-            soundPlayer.announce(pending.object, pending.lastDistance, selection.count > 1);
-            pending.spoken = true;
-            pending.lastBeepElapsed = now;
-            return "Voice: type -> limit -> "
-                    + StrelkaAlertAlgorithm.spokenDistance(pending.lastDistance) + " m";
+        StrelkaAlertTracker.State pending = update.pendingVoice;
+        if (pending != null) {
+            soundPlayer.announce(pending.object, pending.distanceMeters,
+                    update.activeCount > 1);
+            alertTracker.markSpoken(pending.object.id);
+            return "Вход подтверждён: голос · " + pending.distanceMeters + " м";
         }
-        ActiveAlert closest = selection.closest;
-        if (speedKmh >= 3 && closest != null && closest.spoken) {
-            long interval = StrelkaAlertAlgorithm.beepIntervalMillis(closest.lastDistance);
-            if (now - closest.lastBeepElapsed >= interval) {
-                soundPlayer.beep(closest.lastDistance);
-                closest.lastBeepElapsed = now;
+        StrelkaAlertTracker.State closest = update.closestActive;
+        if (closest != null && closest.spoken) {
+            if (StrelkaAlertAlgorithm.isOverspeeding(closest.object, speedKmh)) {
+                boolean signaled = scanPerformed
+                        && soundPlayer.beepIfIdle(closest.distanceMeters);
+                return "В зоне: " + closest.distanceMeters + " м · превышение +"
+                        + StrelkaAlertAlgorithm.OVERSPEED_THRESHOLD_KMH + " · "
+                        + (signaled ? "сигнал" : "ожидание сигнала");
             }
-            return "Signal: " + closest.lastDistance + " m / "
-                    + closest.activationDistance + " m";
+            return "В зоне: " + closest.distanceMeters + " м · без превышения";
+        }
+        StrelkaAlertTracker.State tracking = update.closestTracking;
+        if (tracking != null) {
+            int required = Math.round(tracking.distanceMeters * 0.1f);
+            return "Подтверждение подхода: " + Math.round(tracking.confidence)
+                    + " / " + required;
         }
         if (nearest != null) {
-            return "Waiting for zone: " + Math.round(nearestDistance) + " m / "
-                    + nearestAlertDistance + " m";
+            return "До зоны: " + Math.round(nearestDistance) + " м / "
+                    + nearestAlertDistance + " м";
         }
-        return "Search radius: " + StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS + " m";
+        return "Поиск впереди: "
+                + StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS + " м";
     }
 
     private float speed(Location location) {
@@ -340,6 +354,12 @@ public final class TrackingService extends Service implements LocationListener {
                 location.getLatitude(), location.getLongitude());
         }
         return 0;
+    }
+
+    private static float averageHeading(float first, float second) {
+        double x = Math.cos(Math.toRadians(first)) + Math.cos(Math.toRadians(second));
+        double y = Math.sin(Math.toRadians(first)) + Math.sin(Math.toRadians(second));
+        return Geo.normalize((float) Math.toDegrees(Math.atan2(y, x)));
     }
 
     private boolean hasRecentGpsFix() {
@@ -397,33 +417,6 @@ public final class TrackingService extends Service implements LocationListener {
         sendBroadcast(update);
     }
 
-    private static final class ActiveAlert {
-        final CameraPoint object;
-        final int activationDistance;
-        boolean current;
-        boolean spoken;
-        int lastDistance;
-        long lastSeenElapsed;
-        long lastBeepElapsed;
-
-        ActiveAlert(CameraPoint object, int activationDistance) {
-            this.object = object;
-            this.activationDistance = activationDistance;
-        }
-    }
-
-    private static final class AlertSelection {
-        final ActiveAlert closest;
-        final ActiveAlert pendingVoice;
-        final int count;
-
-        AlertSelection(ActiveAlert closest, ActiveAlert pendingVoice, int count) {
-            this.closest = closest;
-            this.pendingVoice = pendingVoice;
-            this.count = count;
-        }
-    }
-
     private Notification notification(String text) {
         Intent open = new Intent(this, MainActivity.class);
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -461,6 +454,7 @@ public final class TrackingService extends Service implements LocationListener {
 
     @Override public void onDestroy() {
         try { locationManager.removeUpdates(this); } catch (RuntimeException ignored) {}
+        alertTracker.clear();
         if (soundPlayer != null) soundPlayer.release();
         if (tts != null) { tts.stop(); tts.shutdown(); }
         database.close();

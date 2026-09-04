@@ -54,9 +54,11 @@ public final class StrelkaSoundPlayer implements MediaPlayer.OnCompletionListene
         playNextIfIdle();
     }
 
-    public synchronized void beep(int distanceMeters) {
+    public synchronized boolean beepIfIdle(int distanceMeters) {
+        if (player != null || !queue.isEmpty()) return false;
         add("beep.mp3", StrelkaAlertAlgorithm.beepVolume(distanceMeters));
         playNextIfIdle();
+        return true;
     }
 
     public synchronized void objectFinished(CameraPoint object) {
