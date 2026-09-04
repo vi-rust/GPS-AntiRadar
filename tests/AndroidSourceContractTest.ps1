@@ -210,6 +210,17 @@ if ($activity -match "MapKitFactory.getInstance...on(?:Start|Stop)") {
     throw "MainActivity must acquire and release the application-owned MapKit lifecycle"
 }
 Assert-Contains -Text $activity -Pattern "applyImmersiveMode" -Message "MainActivity must define immersive phone mode"
+$immersiveStart = $activity.IndexOf("private void applyImmersiveMode")
+$immersiveEnd = $activity.IndexOf("@Override protected void onResume", $immersiveStart)
+$immersiveMode = if ($immersiveStart -ge 0 -and $immersiveEnd -gt $immersiveStart) {
+    $activity.Substring($immersiveStart, $immersiveEnd - $immersiveStart)
+} else { "" }
+$decorMaterialization = $immersiveMode.IndexOf("getWindow().getDecorView()")
+$controllerLookup = $immersiveMode.IndexOf("getWindow().getInsetsController()")
+if ($decorMaterialization -lt 0 -or $controllerLookup -lt 0 -or
+        $decorMaterialization -gt $controllerLookup) {
+    throw "API 30+ immersive mode must materialize DecorView before Window.getInsetsController"
+}
 Assert-Contains -Text $activity -Pattern "onWindowFocusChanged" -Message "MainActivity must restore immersive mode after focus returns"
 Assert-Contains -Text $activity -Pattern "hasFocus. applyImmersiveMode" -Message "immersive mode must restore only when focus returns"
 Assert-Contains -Text $activity -Pattern "WindowInsets.Type.displayCutout" -Message "HUD must only inset for the display cutout"

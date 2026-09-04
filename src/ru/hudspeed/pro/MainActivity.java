@@ -126,6 +126,8 @@ public final class MainActivity extends Activity {
     private void applyImmersiveMode() {
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
+            // Some Android 16 builds dereference PhoneWindow.mDecor here.
+            getWindow().getDecorView();
             WindowInsetsController controller = getWindow().getInsetsController();
             if (controller != null) {
                 controller.hide(WindowInsets.Type.systemBars());
