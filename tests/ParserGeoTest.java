@@ -10,6 +10,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ParserGeoTest {
     public static void main(String[] args) throws Exception {
@@ -146,6 +149,7 @@ public final class ParserGeoTest {
         verifyProcessLaunchGuard();
         verifyRadarBaseUpdateSingleFlight();
         verifyRadarBaseUpdateStates();
+        verifyRadarBaseUpdateListenerRegistry();
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
         verifyMapMarkerEntityDiff();
@@ -478,6 +482,149 @@ public final class ParserGeoTest {
         check(alreadyRunning.isTerminal() && alreadyRunning.importedCount == 0
                         && !alreadyRunning.coordinatesCorrected,
                 "ALREADY_RUNNING is terminal and does not expose import results");
+    }
+
+    private static void verifyRadarBaseUpdateListenerRegistry() throws Exception {
+        QueuedUpdateDispatcher removeDispatcher = new QueuedUpdateDispatcher();
+        RadarBaseUpdateListenerRegistry removeRegistry =
+                new RadarBaseUpdateListenerRegistry(removeDispatcher);
+        RecordingUpdateListener removed = new RecordingUpdateListener();
+        removeRegistry.addListener(removed, false);
+        removeRegistry.publish(RadarBaseUpdateState.Status.STARTED, 0, false, "started");
+        removeRegistry.removeListener(removed);
+        removeDispatcher.runNext();
+        check(removed.sequences.isEmpty(),
+                "a queued RadarBase callback is rejected after listener removal");
+
+        QueuedUpdateDispatcher readdDispatcher = new QueuedUpdateDispatcher();
+        RadarBaseUpdateListenerRegistry readdRegistry =
+                new RadarBaseUpdateListenerRegistry(readdDispatcher);
+        RecordingUpdateListener readded = new RecordingUpdateListener();
+        readdRegistry.addListener(readded, false);
+        readdRegistry.publish(RadarBaseUpdateState.Status.STARTED, 0, false, "started");
+        readdRegistry.removeListener(readded);
+        readdRegistry.addListener(readded, false);
+        readdRegistry.publish(RadarBaseUpdateState.Status.UNCHANGED, 0, false, "unchanged");
+        readdDispatcher.runNext();
+        readdDispatcher.runNext();
+        check(readded.sequences.equals(Collections.singletonList(2L)),
+                "a callback from an old listener registration is rejected after re-add");
+
+        QueuedUpdateDispatcher reverseDispatcher = new QueuedUpdateDispatcher();
+        RadarBaseUpdateListenerRegistry reverseRegistry =
+                new RadarBaseUpdateListenerRegistry(reverseDispatcher);
+        RecordingUpdateListener reversed = new RecordingUpdateListener();
+        reverseRegistry.addListener(reversed, false);
+        reverseRegistry.publish(RadarBaseUpdateState.Status.STARTED, 0, false, "started");
+        reverseRegistry.publish(RadarBaseUpdateState.Status.UNCHANGED, 0, false, "unchanged");
+        reverseDispatcher.runAt(1);
+        reverseDispatcher.runAt(0);
+        check(reversed.sequences.equals(Collections.singletonList(2L)),
+                "an older RadarBase state is rejected after a newer state was delivered");
+
+        BlockingFirstUpdateDispatcher orderedDispatcher =
+                new BlockingFirstUpdateDispatcher();
+        final RadarBaseUpdateListenerRegistry orderedRegistry =
+                new RadarBaseUpdateListenerRegistry(orderedDispatcher);
+        final RecordingUpdateListener ordered = new RecordingUpdateListener();
+        final CountDownLatch secondPublisherReady = new CountDownLatch(1);
+        orderedRegistry.addListener(ordered, false);
+        Thread firstPublisher = new Thread(new Runnable() {
+            @Override public void run() {
+                orderedRegistry.publish(RadarBaseUpdateState.Status.STARTED,
+                        0, false, "started");
+            }
+        }, "registry-publish-1");
+        Thread secondPublisher = new Thread(new Runnable() {
+            @Override public void run() {
+                secondPublisherReady.countDown();
+                orderedRegistry.publish(RadarBaseUpdateState.Status.UNCHANGED,
+                        0, false, "unchanged");
+            }
+        }, "registry-publish-2");
+        firstPublisher.start();
+        check(orderedDispatcher.firstPostEntered.await(2, TimeUnit.SECONDS),
+                "first RadarBase callback reaches dispatcher");
+        secondPublisher.start();
+        check(secondPublisherReady.await(2, TimeUnit.SECONDS),
+                "second RadarBase publisher starts");
+        check(waitUntilBlockedBeforeSecondPost(secondPublisher, orderedDispatcher),
+                "state mutation, snapshot, and enqueue share one registry lock");
+        orderedDispatcher.releaseFirstPost.countDown();
+        firstPublisher.join(2000);
+        secondPublisher.join(2000);
+        check(!firstPublisher.isAlive() && !secondPublisher.isAlive(),
+                "concurrent RadarBase publishers complete");
+        orderedDispatcher.runNext();
+        orderedDispatcher.runNext();
+        check(ordered.sequences.equals(java.util.Arrays.asList(1L, 2L)),
+                "RadarBase callback enqueue order follows publish sequence");
+    }
+
+    private static boolean waitUntilBlockedBeforeSecondPost(
+            Thread publisher, BlockingFirstUpdateDispatcher dispatcher) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            if (dispatcher.secondPostEntered.getCount() == 0) return false;
+            if (publisher.getState() == Thread.State.BLOCKED) return true;
+            Thread.yield();
+        }
+        return false;
+    }
+
+    private static final class RecordingUpdateListener
+            implements RadarBaseUpdateListenerRegistry.Listener {
+        final List<Long> sequences = new ArrayList<>();
+
+        @Override public void onRadarBaseUpdate(RadarBaseUpdateState state) {
+            sequences.add(state.sequence);
+        }
+    }
+
+    private static class QueuedUpdateDispatcher
+            implements RadarBaseUpdateListenerRegistry.Dispatcher {
+        final List<Runnable> callbacks = Collections.synchronizedList(new ArrayList<Runnable>());
+
+        @Override public void post(Runnable callback) {
+            callbacks.add(callback);
+        }
+
+        void runNext() {
+            runAt(0);
+        }
+
+        void runAt(int index) {
+            Runnable callback;
+            synchronized (callbacks) {
+                callback = callbacks.remove(index);
+            }
+            callback.run();
+        }
+    }
+
+    private static final class BlockingFirstUpdateDispatcher extends QueuedUpdateDispatcher {
+        final CountDownLatch firstPostEntered = new CountDownLatch(1);
+        final CountDownLatch secondPostEntered = new CountDownLatch(1);
+        final CountDownLatch releaseFirstPost = new CountDownLatch(1);
+        final AtomicInteger postCount = new AtomicInteger();
+
+        @Override public void post(Runnable callback) {
+            int call = postCount.incrementAndGet();
+            if (call == 1) {
+                firstPostEntered.countDown();
+                try {
+                    if (!releaseFirstPost.await(2, TimeUnit.SECONDS)) {
+                        throw new AssertionError("first dispatcher post was not released");
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("dispatcher interrupted", error);
+                }
+            } else if (call == 2) {
+                secondPostEntered.countDown();
+            }
+            super.post(callback);
+        }
     }
 
     private static void verifyCameraMarkerDiff() {

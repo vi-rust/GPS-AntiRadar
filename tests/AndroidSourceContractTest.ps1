@@ -12,6 +12,7 @@ $activity = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed
 $application = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\GpsAntiRadarApplication.java")
 $updateState = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateState.java")
 $updater = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdater.java")
+$listenerRegistry = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateListenerRegistry.java")
 $snapshot = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java")
 $snapshotAdapter = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshotIntent.java")
 
@@ -106,9 +107,9 @@ Assert-Contains -Text $tracking -Pattern 'speedKmh, overspeedThresholdKmh\)' -Me
 
 Assert-Contains -Text $application -Pattern 'RadarBaseUpdateSingleFlight radarBaseUpdateGuard' -Message "the update guard must live for the whole process"
 Assert-Contains -Text $updateState -Pattern 'enum Status \{\s*IDLE,\s*STARTED,\s*UNCHANGED,\s*SUCCESS,\s*ERROR,\s*ALREADY_RUNNING\s*\}' -Message "RadarBase update states must expose the shared lifecycle"
-Assert-Contains -Text $updater -Pattern 'volatile RadarBaseUpdateState latestState' -Message "the latest update state must be visible process-wide"
+Assert-Contains -Text $listenerRegistry -Pattern 'volatile RadarBaseUpdateState latestState' -Message "the latest update state must be visible process-wide"
 Assert-Contains -Text $updater -Pattern 'Handler\(Looper\.getMainLooper\(\)\)' -Message "update listeners must be dispatched on the main thread"
-Assert-Contains -Text $updater -Pattern 'new ArrayList<.*>\(listeners\)' -Message "listener callbacks must iterate over a stable copy"
+Assert-Contains -Text $updater -Pattern 'interface Listener extends RadarBaseUpdateListenerRegistry\.Listener' -Message "the public updater listener API must use the race-safe registry"
 Assert-Contains -Text $updater -Pattern 'if \(!gate\.tryStart\(\)\)' -Message "all update requests must use the process single-flight gate"
 Assert-Contains -Text $updater -Pattern 'new Thread\([\s\S]*"radarbase-download"\)\.start\(\)' -Message "RadarBase network work must run on the download thread"
 

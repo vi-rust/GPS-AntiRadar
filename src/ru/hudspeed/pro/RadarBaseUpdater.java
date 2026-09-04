@@ -10,8 +10,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.zip.GZIPInputStream;
 
 public final class RadarBaseUpdater {
@@ -26,21 +24,22 @@ public final class RadarBaseUpdater {
     private static final String RADARBASE_IMPORT_FORMAT = "radarbase_import_format";
     private static final int CURRENT_RADARBASE_IMPORT_FORMAT = 2;
 
-    public interface Listener {
-        void onRadarBaseUpdate(RadarBaseUpdateState state);
-    }
+    public interface Listener extends RadarBaseUpdateListenerRegistry.Listener {}
 
     private final Context context;
     private final RadarBaseUpdateSingleFlight gate;
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final List<Listener> listeners = new ArrayList<>();
-    private volatile RadarBaseUpdateState latestState = new RadarBaseUpdateState(
-            0, RadarBaseUpdateState.Status.IDLE, 0, false, "");
-    private long sequence;
+    private final RadarBaseUpdateListenerRegistry listenerRegistry;
 
     public RadarBaseUpdater(Context context, RadarBaseUpdateSingleFlight gate) {
         this.context = context.getApplicationContext();
         this.gate = gate;
+        final Handler mainHandler = new Handler(Looper.getMainLooper());
+        listenerRegistry = new RadarBaseUpdateListenerRegistry(
+                new RadarBaseUpdateListenerRegistry.Dispatcher() {
+                    @Override public void post(Runnable callback) {
+                        mainHandler.post(callback);
+                    }
+                });
     }
 
     public void requestUpdate() {
@@ -59,21 +58,15 @@ public final class RadarBaseUpdater {
     }
 
     public RadarBaseUpdateState latestState() {
-        return latestState;
+        return listenerRegistry.latestState();
     }
 
-    public synchronized void addListener(Listener listener, boolean replayLatest) {
-        if (listener == null) return;
-        if (!listeners.contains(listener)) listeners.add(listener);
-        if (replayLatest) {
-            List<Listener> replay = new ArrayList<>();
-            replay.add(listener);
-            dispatch(replay, latestState);
-        }
+    public void addListener(Listener listener, boolean replayLatest) {
+        listenerRegistry.addListener(listener, replayLatest);
     }
 
-    public synchronized void removeListener(Listener listener) {
-        listeners.remove(listener);
+    public void removeListener(Listener listener) {
+        listenerRegistry.removeListener(listener);
     }
 
     private void updateInBackground() {
@@ -154,24 +147,6 @@ public final class RadarBaseUpdater {
 
     private void publish(RadarBaseUpdateState.Status status, int importedCount,
                          boolean coordinatesCorrected, String message) {
-        RadarBaseUpdateState state;
-        List<Listener> snapshot;
-        synchronized (this) {
-            state = new RadarBaseUpdateState(++sequence, status, importedCount,
-                    coordinatesCorrected, message);
-            latestState = state;
-            snapshot = new ArrayList<Listener>(listeners);
-        }
-        dispatch(snapshot, state);
-    }
-
-    private void dispatch(final List<Listener> targets, final RadarBaseUpdateState state) {
-        mainHandler.post(new Runnable() {
-            @Override public void run() {
-                for (Listener listener : targets) {
-                    listener.onRadarBaseUpdate(state);
-                }
-            }
-        });
+        listenerRegistry.publish(status, importedCount, coordinatesCorrected, message);
     }
 }
