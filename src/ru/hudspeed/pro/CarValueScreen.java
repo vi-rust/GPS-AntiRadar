@@ -24,7 +24,7 @@ public final class CarValueScreen extends Screen {
                 AppSettings.ALERT_DISTANCE_STEP_METERS),
         OVERSPEED_THRESHOLD(
                 AppSettings.OVERSPEED_THRESHOLD,
-                "Предел превышения для beep",
+                "Предел превышения скорости",
                 AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH,
                 AppSettings.MIN_OVERSPEED_THRESHOLD_KMH,
                 AppSettings.MAX_OVERSPEED_THRESHOLD_KMH,

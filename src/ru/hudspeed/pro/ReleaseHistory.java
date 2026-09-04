@@ -6,6 +6,9 @@ import java.util.List;
 
 public final class ReleaseHistory {
     private static final List<Entry> RELEASES = Collections.unmodifiableList(Arrays.asList(
+            new Entry("4.9.6", "Текущее положение отображается жёлтой стрелкой по GPS-курсу. "
+                    + "Добавлен выключенный по умолчанию автоповорот карты на телефоне и в Android Auto. "
+                    + "Визуальный GPS-курс отделён от сглаженного курса алгоритма оповещений."),
             new Entry("4.9.5", "Добавлен экран движения Android Auto с картой, объектами, "
                     + "HUD и полным меню. На телефоне скрываются системные панели, а обновление "
                     + "RadarBase запускается при холодном старте процесса."),

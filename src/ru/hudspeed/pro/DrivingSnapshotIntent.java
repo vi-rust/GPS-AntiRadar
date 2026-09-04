@@ -15,6 +15,7 @@ public final class DrivingSnapshotIntent {
                 intent.getIntExtra(TrackingService.EXTRA_ALERT_DISTANCE, 0),
                 intent.getDoubleExtra(TrackingService.EXTRA_LATITUDE, Double.NaN),
                 intent.getDoubleExtra(TrackingService.EXTRA_LONGITUDE, Double.NaN),
+                intent.getFloatExtra(TrackingService.EXTRA_HEADING, Float.NaN),
                 intent.getStringExtra(TrackingService.EXTRA_ALERT_STATE),
                 intent.getStringExtra(TrackingService.EXTRA_ALERT_ALGORITHM));
     }

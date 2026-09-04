@@ -36,6 +36,8 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\CameraMarkerDiff.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerLayout.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerEntityDiff.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\MapOrientation.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\HeadingSelection.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseParser.java") `
     (Join-Path $Project "tests\ParserGeoTest.java")
 if ($LASTEXITCODE -ne 0) { throw "Tests did not compile" }

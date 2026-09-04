@@ -6,6 +6,7 @@ public final class AppSettings {
     public static final String OVERSPEED_THRESHOLD = "overspeed_threshold_kmh";
     public static final String MAPKIT_KEY = "yandex_mapkit_key";
     public static final String HUD_TRANSPARENCY = "hud_transparency";
+    public static final String AUTO_ROTATE_MAP = "auto_rotate_map";
     public static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
             "radarbase_last_successful_download";
 
@@ -18,6 +19,7 @@ public final class AppSettings {
     public static final int MAX_OVERSPEED_THRESHOLD_KMH = 20;
     public static final int OVERSPEED_THRESHOLD_STEP_KMH = 1;
     public static final int DEFAULT_HUD_TRANSPARENCY_PERCENT = 10;
+    public static final boolean DEFAULT_AUTO_ROTATE_MAP = false;
     public static final int MIN_HUD_TRANSPARENCY_PERCENT = 0;
     public static final int MAX_HUD_TRANSPARENCY_PERCENT = 80;
     public static final int HUD_TRANSPARENCY_STEP_PERCENT = 5;

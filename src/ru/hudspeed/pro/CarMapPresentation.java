@@ -120,7 +120,8 @@ public final class CarMapPresentation {
         stateView.setText(snapshot.alertState);
         if (snapshot.hasLocation() && mapLayer != null) {
             mapLayer.updateCurrentLocation(
-                    snapshot.latitude, snapshot.longitude, snapshot.speedKmh);
+                    snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
+                    snapshot.headingDegrees);
         }
     }
 

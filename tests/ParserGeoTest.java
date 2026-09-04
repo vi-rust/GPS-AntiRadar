@@ -155,6 +155,8 @@ public final class ParserGeoTest {
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
         verifyMapMarkerEntityDiff();
+        verifyMapOrientation();
+        verifyHeadingChannels();
 
         verifyMapMarkerPresentationEquality();
         verifyDrivingSnapshotAndHud();
@@ -170,6 +172,8 @@ public final class ParserGeoTest {
                         && AppSettings.adjustHudTransparency(75, 1) == 80
                         && AppSettings.adjustHudTransparency(80, 1) == 80,
                 "HUD transparency uses 0..80 with a 5 percent step");
+        check(!AppSettings.DEFAULT_AUTO_ROTATE_MAP,
+                "map auto-rotation is disabled by default");
         check(AppSettings.clampAlertDistance(299) == 300
                         && AppSettings.clampAlertDistance(350) == 300
                         && AppSettings.clampAlertDistance(2300) == 2000
@@ -219,10 +223,12 @@ public final class ParserGeoTest {
                 "idle HUD uses the shared empty state");
 
         DrivingSnapshot insideZone = new DrivingSnapshot(64.6f, 3.5f, 250,
-                "Камера", 42L, 80, 800, 56.84, 60.61, "inside", "diagnostic");
+                "Камера", 42L, 80, 800, 56.84, 60.61, 123f,
+                "inside", "diagnostic");
         check(insideZone.hasLocation() && insideZone.hasObject()
                         && insideZone.accuracyMeters == 3.5f
                         && insideZone.cameraId == 42L
+                        && insideZone.headingDegrees == 123f
                         && insideZone.alertState.equals("inside")
                         && insideZone.alertAlgorithm.equals("diagnostic"),
                 "active driving snapshot preserves shared movement state");
@@ -236,14 +242,14 @@ public final class ParserGeoTest {
 
         DrivingHudPresentation farHud = DrivingHudPresentation.from(new DrivingSnapshot(
                 70f, Float.NaN, 1250, "Камера", 43L, 80, 800,
-                Double.NaN, Double.NaN, "", ""));
+                Double.NaN, Double.NaN, Float.NaN, "", ""));
         check(farHud.distanceText.equals("1.3 км")
                         && farHud.speedColor == DrivingHudPresentation.COLOR_GREEN,
                 "HUD formats distances above one kilometer and inactive color");
 
         DrivingHudPresentation overspeedHud = DrivingHudPresentation.from(
                 new DrivingSnapshot(81f, Float.NaN, 250, "Камера", 44L, 80, 800,
-                        Double.NaN, Double.NaN, "", ""));
+                        Double.NaN, Double.NaN, Float.NaN, "", ""));
         check(overspeedHud.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
                 "overspeed color takes priority inside the alert zone");
     }
@@ -258,11 +264,41 @@ public final class ParserGeoTest {
                         CarMenuItem.ALERT_DISTANCE,
                         CarMenuItem.OVERSPEED_THRESHOLD,
                         CarMenuItem.HUD_TRANSPARENCY,
+                        CarMenuItem.AUTO_ROTATE_MAP,
                         CarMenuItem.MAPKIT_KEY,
                         CarMenuItem.ABOUT,
                         CarMenuItem.EXIT
                 }),
-                "car menu exposes all seven actions in display order");
+                "car menu exposes all eight actions in display order");
+    }
+
+    private static void verifyMapOrientation() {
+        check(MapOrientation.stableHeading(45f, 370f, 2.9f) == 45f,
+                "stationary GPS jitter must not rotate the location arrow");
+        check(MapOrientation.stableHeading(45f, 370f, 3f) == 10f,
+                "movement heading is normalized for the location arrow");
+        check(MapOrientation.stableHeading(45f, Float.NaN, 30f) == 45f,
+                "missing movement heading preserves the last arrow direction");
+        check(MapOrientation.cameraAzimuth(false, 50f, 120f, 25f) == 25f,
+                "disabled auto-rotation preserves the map azimuth");
+        check(MapOrientation.cameraAzimuth(true, 2.9f, 120f, 25f) == 25f,
+                "auto-rotation ignores stationary heading jitter");
+        check(MapOrientation.cameraAzimuth(true, 3f, 120f, 25f) == 120f,
+                "enabled auto-rotation follows the movement heading");
+    }
+
+    private static void verifyHeadingChannels() {
+        HeadingSelection turn = HeadingSelection.forStrelka(
+                90f, 0f, 45f, true, true);
+        check(turn.visualHeading == 90f,
+                "visual heading must follow a turn without radar smoothing delay");
+        check(turn.alertHeading == 45f,
+                "alert heading keeps the Strelka smoothing used for zone matching");
+
+        HeadingSelection betweenScans = HeadingSelection.forStrelka(
+                90f, 0f, 0f, false, true);
+        check(betweenScans.visualHeading == 90f && betweenScans.alertHeading == 0f,
+                "visual and alert headings stay independent between radar scans");
     }
 
     private static void verifyStrelkaAlertLifecycle() {
@@ -419,28 +455,29 @@ public final class ParserGeoTest {
 
     private static void verifyKnownReleaseHistory() {
         List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
-        check(releases.size() == 9, "about dialog contains every known release");
-        check(releases.get(0).version.equals("4.9.5")
-                        && releases.get(1).version.equals("4.9.4")
-                        && releases.get(2).version.equals("4.9.3")
-                        && releases.get(3).version.equals("4.9.2")
-                        && releases.get(4).version.equals("4.9.1")
-                        && releases.get(5).version.equals("4.9.0")
-                        && releases.get(6).version.equals("4.8.1")
-                        && releases.get(7).version.equals("4.8.0")
-                        && releases.get(8).version.equals("4.7.1"),
+        check(releases.size() == 10, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.6")
+                        && releases.get(1).version.equals("4.9.5")
+                        && releases.get(2).version.equals("4.9.4")
+                        && releases.get(3).version.equals("4.9.3")
+                        && releases.get(4).version.equals("4.9.2")
+                        && releases.get(5).version.equals("4.9.1")
+                        && releases.get(6).version.equals("4.9.0")
+                        && releases.get(7).version.equals("4.8.1")
+                        && releases.get(8).version.equals("4.8.0")
+                        && releases.get(9).version.equals("4.7.1"),
                 "release history is newest first");
         for (ReleaseHistory.Entry release : releases) {
             check(release.changes != null && !release.changes.trim().isEmpty(),
                     "every release has a visible change description");
         }
-        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.5");
+        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.6");
         check(current != null && !current.changes.trim().isEmpty(),
                 "current release has a visible change description");
-        check(current.changes.contains("Android Auto")
-                        && current.changes.contains("системные панели")
-                        && current.changes.contains("холодном старте"),
-                "current release describes Android Auto, immersive mode and cold start update");
+        check(current.changes.contains("стрелк")
+                        && current.changes.contains("автоповорот")
+                        && current.changes.contains("GPS-курс"),
+                "current release describes the heading arrow and map auto-rotation");
         check(ReleaseHistory.find("missing") == null,
                 "unknown release has no fabricated description");
     }

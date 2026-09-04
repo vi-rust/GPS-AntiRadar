@@ -76,9 +76,11 @@ Assert-Contains $sharedMapLayer 'this\.resourceContext = context;' "map resource
 Assert-Contains $sharedMapLayer 'new CameraDatabase\(queryContext\)' "database work must use the application context"
 Assert-Contains $sharedMapLayer 'resourceContext\.getResources\(\)' "marker dimensions must use display-aware resources"
 Assert-Contains $sharedMapLayer 'resourceContext\.getDrawable\(' "marker drawables must use the display-aware context"
-Assert-Contains $sharedMapLayer 'updateCurrentLocation\(double latitude, double longitude, float speedKmh\)' "location updates must name the movement input speedKmh"
+Assert-Contains $sharedMapLayer 'updateCurrentLocation\(double latitude, double longitude, float speedKmh,\s*float headingDegrees\)' "location updates must include movement speed and heading"
 Assert-Contains $sharedMapLayer 'mapCenteredOnGps && speedKmh < 1f' "stationary updates below 1 km/h must not keep moving the followed map"
-Assert-Contains $activity 'snapshot\.latitude, snapshot\.longitude, snapshot\.speedKmh' "phone map following must use snapshot speed"
+Assert-Contains $activity 'snapshot\.latitude, snapshot\.longitude, snapshot\.speedKmh,\s*snapshot\.headingDegrees' "phone map following must use snapshot speed and heading"
+Assert-Contains $sharedMapLayer 'locationPlacemark\.setDirection\(lastHeadingDegrees\)' "the current-location arrow must follow the movement heading"
+Assert-Contains $sharedMapLayer 'AppSettings\.AUTO_ROTATE_MAP' "map auto-rotation must use the shared persisted setting"
 $markerChangesStart = $sharedMapLayer.IndexOf("boolean markerChanges")
 $markerRemoveStart = $sharedMapLayer.IndexOf("for (String key", $markerChangesStart)
 $markerChangesBlock = if ($markerChangesStart -ge 0 -and $markerRemoveStart -gt $markerChangesStart) {
@@ -123,8 +125,14 @@ if ($snapshot -match '\b(?:import\s+)?android\.') {
 }
 foreach ($extra in @("EXTRA_SPEED", "EXTRA_ACCURACY", "EXTRA_DISTANCE", "EXTRA_CAMERA",
         "EXTRA_CAMERA_ID", "EXTRA_LIMIT", "EXTRA_ALERT_DISTANCE", "EXTRA_LATITUDE",
-        "EXTRA_LONGITUDE", "EXTRA_ALERT_STATE", "EXTRA_ALERT_ALGORITHM")) {
+        "EXTRA_LONGITUDE", "EXTRA_HEADING", "EXTRA_ALERT_STATE", "EXTRA_ALERT_ALGORITHM")) {
     Assert-Contains $snapshotAdapter ([regex]::Escape("TrackingService.$extra")) "DrivingSnapshotIntent must read $extra"
+}
+Assert-Contains $tracking 'HeadingSelection\.forStrelka\(' "Strelka tracking must explicitly separate visual and alert headings"
+Assert-Contains $tracking 'matchesZone\(object, distance,\s*alertHeading, bearing' "Strelka zone matching must use the smoothed alert heading"
+Assert-Contains $tracking 'sendUpdate\(location, speedKmh, headings\.visualHeading' "map updates must use the immediate visual heading"
+if ($tracking -match 'sendUpdate\(location, speedKmh, alertHeading') {
+    throw "smoothed alert heading must never be sent to the map"
 }
 Assert-Contains $snapshotAdapter 'getFloatExtra\(TrackingService\.EXTRA_ACCURACY,\s*Float\.NaN\)' "missing accuracy must remain distinguishable in a driving snapshot"
 if ([regex]::Matches($tracking, 'putExtra\(EXTRA_CAMERA_ID').Count -ne 2) {
@@ -242,8 +250,8 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
-Assert-Contains $buildGradle 'versionCode\s*=\s*40' "release must use versionCode 40"
-Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.5'" "release must use versionName 4.9.5"
+Assert-Contains $buildGradle 'versionCode\s*=\s*41' "release must use versionCode 41"
+Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.6'" "release must use versionName 4.9.6"
 Assert-Contains $buildGradle 'androidComponents\s*\{[\s\S]*beforeVariants\(selector\(\)\.withBuildType\("release"\)\)[\s\S]*enableUnitTest\s*=\s*true' "AGP must create a real release unit-test variant"
 foreach ($dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
@@ -467,7 +475,7 @@ Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PA
 Assert-Contains $carMapScreen 'setPanModeListener' "Car map must forward pan mode changes"
 Assert-Contains $carMapScreen 'getCarService\(ScreenManager\.class\)[\s\S]*push\(new CarMenuScreen' "Car map menu action must push the real menu through ScreenManager"
 Assert-Contains $carMapScreen 'R\.drawable\.ic_car_menu' "Car map menu action must use its monochrome icon"
-Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*ALERT_DISTANCE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
+Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*ALERT_DISTANCE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*AUTO_ROTATE_MAP,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
 Assert-Contains $carMenu 'ListTemplate\.Builder\(\)[\s\S]*setHeaderAction\(Action\.BACK\)[\s\S]*setSingleList' "Car menu must use one back-enabled ListTemplate"
 Assert-Contains $carMenu 'application\(carContext\)\.radarBaseUpdater\(\)' "Car menu must reuse the application-owned RadarBaseUpdater"
 if ($carMenu -match 'new\s+RadarBaseUpdater\s*\(|new\s+StrelkaAlertTracker\s*\(') {

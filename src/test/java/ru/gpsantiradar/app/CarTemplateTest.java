@@ -147,8 +147,10 @@ public final class CarTemplateTest {
         assertEquals(2, hudRefreshes[0]);
     }
 
-    @Test public void carMenuShowsSevenActionsAndRoutesEverySettingsScreen() {
+    @Test public void carMenuShowsAutoRotateToggleAndRoutesEverySettingsScreen() {
         CarContext carContext = carContext();
+        carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
         FakeUpdateController updates = new FakeUpdateController();
         CarMenuScreen screen = new CarMenuScreen(
                 carContext, null, updates, () -> {});
@@ -159,8 +161,9 @@ public final class CarTemplateTest {
         assertEquals(Arrays.asList(
                 "Обновить базу",
                 "Расстояние оповещения",
-                "Предел превышения для beep",
+                "Предел превышения скорости",
                 "Прозрачность HUD",
+                "Автоповорот карты",
                 "Ключ MapKit",
                 "О программе",
                 "Выход"), rowTitles(items));
@@ -169,7 +172,7 @@ public final class CarTemplateTest {
                 carContext.getCarService(androidx.car.app.ScreenManager.class);
         String[] expectedTitles = {
                 "Расстояние оповещения",
-                "Предел превышения для beep",
+                "Предел превышения скорости",
                 "Прозрачность HUD"
         };
         for (int index = 1; index <= 3; index++) {
@@ -180,11 +183,18 @@ public final class CarTemplateTest {
             assertEquals(expectedTitles[index - 1],
                     ((PaneTemplate) pushed.onGetTemplate()).getTitle().toString());
         }
-        screenManager.reset();
-        click((Row) items.get(4));
-        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarMapKeyScreen);
+        Row autoRotate = (Row) items.get(4);
+        assertFalse(autoRotate.getToggle().isChecked());
+        autoRotate.getToggle().getOnCheckedChangeDelegate().sendCheckedChange(
+                true, new OnDoneCallback() {});
+        assertTrue(carContext.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE).getBoolean(
+                AppSettings.AUTO_ROTATE_MAP, false));
         screenManager.reset();
         click((Row) items.get(5));
+        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarMapKeyScreen);
+        screenManager.reset();
+        click((Row) items.get(6));
         assertTrue(screenManager.getScreensPushed().get(0) instanceof CarAboutScreen);
     }
 
@@ -200,7 +210,7 @@ public final class CarTemplateTest {
         click((Row) items.get(0));
         assertEquals(1, updates.requestCount);
 
-        click((Row) items.get(6));
+        click((Row) items.get(7));
         assertEquals(1, exits[0]);
     }
 

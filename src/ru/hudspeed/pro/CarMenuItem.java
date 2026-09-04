@@ -5,6 +5,7 @@ public enum CarMenuItem {
     ALERT_DISTANCE,
     OVERSPEED_THRESHOLD,
     HUD_TRANSPARENCY,
+    AUTO_ROTATE_MAP,
     MAPKIT_KEY,
     ABOUT,
     EXIT

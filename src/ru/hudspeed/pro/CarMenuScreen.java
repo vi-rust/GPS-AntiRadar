@@ -10,6 +10,7 @@ import androidx.car.app.model.ItemList;
 import androidx.car.app.model.ListTemplate;
 import androidx.car.app.model.Row;
 import androidx.car.app.model.Template;
+import androidx.car.app.model.Toggle;
 import androidx.core.graphics.drawable.IconCompat;
 
 public final class CarMenuScreen extends Screen {
@@ -63,10 +64,23 @@ public final class CarMenuScreen extends Screen {
     private Row row(CarMenuItem item) {
         Row.Builder row = new Row.Builder()
                 .setTitle(title(item))
-                .setImage(icon(iconResource(item)), Row.IMAGE_TYPE_ICON)
-                .setBrowsable(item != CarMenuItem.UPDATE_DATABASE
-                        && item != CarMenuItem.EXIT)
-                .setOnClickListener(() -> select(item));
+                .setImage(icon(iconResource(item)), Row.IMAGE_TYPE_ICON);
+        if (item == CarMenuItem.AUTO_ROTATE_MAP) {
+            boolean enabled = getCarContext().getSharedPreferences(
+                    AppSettings.PREFERENCES, android.content.Context.MODE_PRIVATE)
+                    .getBoolean(AppSettings.AUTO_ROTATE_MAP,
+                            AppSettings.DEFAULT_AUTO_ROTATE_MAP);
+            row.setToggle(new Toggle.Builder(checked -> {
+                getCarContext().getSharedPreferences(
+                        AppSettings.PREFERENCES, android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean(AppSettings.AUTO_ROTATE_MAP, checked).apply();
+                invalidate();
+            }).setChecked(enabled).build());
+        } else {
+            row.setBrowsable(item != CarMenuItem.UPDATE_DATABASE
+                            && item != CarMenuItem.EXIT)
+                    .setOnClickListener(() -> select(item));
+        }
         return row.build();
     }
 
@@ -86,6 +100,8 @@ public final class CarMenuScreen extends Screen {
             case HUD_TRANSPARENCY:
                 getScreenManager().push(new CarValueScreen(getCarContext(),
                         CarValueScreen.Setting.HUD_TRANSPARENCY, surfaceController));
+                break;
+            case AUTO_ROTATE_MAP:
                 break;
             case MAPKIT_KEY:
                 getScreenManager().push(new CarMapKeyScreen(getCarContext()));
@@ -116,6 +132,8 @@ public final class CarMenuScreen extends Screen {
                 return R.drawable.ic_speed_limit;
             case HUD_TRANSPARENCY:
                 return R.drawable.ic_opacity;
+            case AUTO_ROTATE_MAP:
+                return R.drawable.ic_navigation;
             case MAPKIT_KEY:
                 return R.drawable.ic_key;
             case ABOUT:
@@ -134,9 +152,11 @@ public final class CarMenuScreen extends Screen {
             case ALERT_DISTANCE:
                 return "Расстояние оповещения";
             case OVERSPEED_THRESHOLD:
-                return "Предел превышения для beep";
+                return "Предел превышения скорости";
             case HUD_TRANSPARENCY:
                 return "Прозрачность HUD";
+            case AUTO_ROTATE_MAP:
+                return "Автоповорот карты";
             case MAPKIT_KEY:
                 return "Ключ MapKit";
             case ABOUT:

@@ -10,12 +10,14 @@ public final class DrivingSnapshot {
     public final int alertDistanceMeters;
     public final double latitude;
     public final double longitude;
+    public final float headingDegrees;
     public final String alertState;
     public final String alertAlgorithm;
 
     public DrivingSnapshot(float speedKmh, float accuracyMeters, int distanceMeters,
             String cameraName, long cameraId, int speedLimitKmh, int alertDistanceMeters,
-            double latitude, double longitude, String alertState, String alertAlgorithm) {
+            double latitude, double longitude, float headingDegrees,
+            String alertState, String alertAlgorithm) {
         this.speedKmh = speedKmh;
         this.accuracyMeters = accuracyMeters;
         this.distanceMeters = distanceMeters;
@@ -25,13 +27,14 @@ public final class DrivingSnapshot {
         this.alertDistanceMeters = alertDistanceMeters;
         this.latitude = latitude;
         this.longitude = longitude;
+        this.headingDegrees = headingDegrees;
         this.alertState = alertState == null ? "" : alertState;
         this.alertAlgorithm = alertAlgorithm == null ? "" : alertAlgorithm;
     }
 
     public static DrivingSnapshot idle() {
         return new DrivingSnapshot(0, Float.NaN, -1, "", -1, 0, 0,
-                Double.NaN, Double.NaN, "", "");
+                Double.NaN, Double.NaN, Float.NaN, "", "");
     }
 
     public boolean hasLocation() {

@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
@@ -62,6 +63,8 @@ public final class SharedCameraMapLayer {
     private long followPausedUntil;
     private double lastLatitude = Double.NaN;
     private double lastLongitude = Double.NaN;
+    private float lastHeadingDegrees;
+    private float lastSpeedKmh;
     private volatile int initialLoadGeneration;
     private volatile int cameraLoadGeneration;
     private volatile boolean destroyed;
@@ -205,10 +208,14 @@ public final class SharedCameraMapLayer {
     }
 
     /** Updates the position and suppresses redundant following below 1 km/h. */
-    public void updateCurrentLocation(double latitude, double longitude, float speedKmh) {
+    public void updateCurrentLocation(double latitude, double longitude, float speedKmh,
+                                      float headingDegrees) {
         if (destroyed) return;
         lastLatitude = latitude;
         lastLongitude = longitude;
+        lastSpeedKmh = speedKmh;
+        lastHeadingDegrees = MapOrientation.stableHeading(
+                lastHeadingDegrees, headingDegrees, speedKmh);
         updateLocationMarker();
         centerOnLocationFromGps(speedKmh);
     }
@@ -218,8 +225,12 @@ public final class SharedCameraMapLayer {
         if (destroyed || activeMap == null
                 || Double.isNaN(lastLatitude) || Double.isNaN(lastLongitude)) return;
         resumeFollowing();
+        CameraPosition current = activeMap.getCameraPosition();
+        float azimuth = MapOrientation.cameraAzimuth(autoRotateMap(), lastSpeedKmh,
+                lastHeadingDegrees, current.getAzimuth());
         activeMap.move(new CameraPosition(
-                        new Point(lastLatitude, lastLongitude), 15f, 0f, 0f),
+                        new Point(lastLatitude, lastLongitude), 15f, azimuth,
+                        current.getTilt()),
                 new Animation(Animation.Type.SMOOTH, 0.55f));
         mapCenteredOnGps = true;
     }
@@ -581,23 +592,54 @@ public final class SharedCameraMapLayer {
                 || locationCollection == null) return;
         Point point = new Point(lastLatitude, lastLongitude);
         if (locationPlacemark == null || !locationPlacemark.isValid()) {
-            locationPlacemark = locationCollection.addPlacemark();
-            locationPlacemark.setIcon(ImageProvider.fromBitmap(createLocationBitmap()));
+            locationPlacemark = locationCollection.addPlacemark(point,
+                    ImageProvider.fromBitmap(createLocationBitmap()), locationMarkerStyle());
             locationPlacemark.setZIndex(100f);
         }
         locationPlacemark.setGeometry(point);
+        locationPlacemark.setDirection(lastHeadingDegrees);
     }
 
     private Bitmap createLocationBitmap() {
-        int size = dp(28);
+        int size = dp(42);
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        float center = size / 2f;
+        Path outline = new Path();
+        outline.moveTo(center, dp(2));
+        outline.lineTo(dp(38), dp(36));
+        outline.lineTo(center, dp(29));
+        outline.lineTo(dp(4), dp(36));
+        outline.close();
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(dp(3));
         paint.setColor(Color.WHITE);
-        canvas.drawCircle(size / 2f, size / 2f, size * 0.47f, paint);
-        paint.setColor(Color.rgb(35, 130, 255));
-        canvas.drawCircle(size / 2f, size / 2f, size * 0.34f, paint);
+        canvas.drawPath(outline, paint);
+
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.rgb(255, 190, 0));
+        canvas.drawPath(outline, paint);
+
+        Path highlight = new Path();
+        highlight.moveTo(center, dp(2));
+        highlight.lineTo(center, dp(29));
+        highlight.lineTo(dp(4), dp(36));
+        highlight.close();
+        paint.setColor(Color.rgb(255, 216, 72));
+        canvas.drawPath(highlight, paint);
         return bitmap;
+    }
+
+    private IconStyle locationMarkerStyle() {
+        return new IconStyle()
+                .setAnchor(new android.graphics.PointF(0.5f, 0.5f))
+                .setRotationType(RotationType.ROTATE)
+                .setFlat(true)
+                .setScale(1f)
+                .setZIndex(100f);
     }
 
     private void centerOnLocationFromGps(float speedKmh) {
@@ -607,10 +649,18 @@ public final class SharedCameraMapLayer {
         if (mapCenteredOnGps && speedKmh < 1f) return;
         CameraPosition current = activeMap.getCameraPosition();
         float zoom = mapCenteredOnGps ? current.getZoom() : 15f;
+        float azimuth = MapOrientation.cameraAzimuth(autoRotateMap(), speedKmh,
+                lastHeadingDegrees, current.getAzimuth());
         activeMap.move(new CameraPosition(new Point(lastLatitude, lastLongitude), zoom,
-                        current.getAzimuth(), current.getTilt()),
+                        azimuth, current.getTilt()),
                 new Animation(Animation.Type.SMOOTH, 0.45f));
         mapCenteredOnGps = true;
+    }
+
+    private boolean autoRotateMap() {
+        return resourceContext != null && resourceContext.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE).getBoolean(
+                AppSettings.AUTO_ROTATE_MAP, AppSettings.DEFAULT_AUTO_ROTATE_MAP);
     }
 
     private int dp(int value) {

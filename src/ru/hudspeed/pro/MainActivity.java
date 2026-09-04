@@ -32,6 +32,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -82,7 +83,8 @@ public final class MainActivity extends Activity {
             cameraView.setTextColor(presentation.speedColor);
             if (cameraMapLayer != null) {
                 cameraMapLayer.updateCurrentLocation(
-                        snapshot.latitude, snapshot.longitude, snapshot.speedKmh);
+                        snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
+                        snapshot.headingDegrees);
             }
         }
     };
@@ -448,13 +450,13 @@ public final class MainActivity extends Activity {
                         AppSettings.OVERSPEED_THRESHOLD,
                         AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
         overspeedThreshold.setProgress(savedOverspeedThreshold);
-        overspeedLabel.setText("Предел превышения для beep: "
+        overspeedLabel.setText("Предел превышения скорости: "
                 + savedOverspeedThreshold + " км/ч");
         overspeedThreshold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress,
                                                      boolean fromUser) {
                 int value = AppSettings.clampOverspeedThreshold(progress);
-                overspeedLabel.setText("Предел превышения для beep: " + value + " км/ч");
+                overspeedLabel.setText("Предел превышения скорости: " + value + " км/ч");
                 if (fromUser) {
                     getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
                             .putInt(AppSettings.OVERSPEED_THRESHOLD, value).apply();
@@ -510,6 +512,29 @@ public final class MainActivity extends Activity {
         });
         transparencyContent.addView(transparency, new LinearLayout.LayoutParams(-1, dp(42)));
         content.addView(transparencyRow, new LinearLayout.LayoutParams(-1, dp(86)));
+
+        LinearLayout autoRotateRow = new LinearLayout(this);
+        autoRotateRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoRotateRow.setGravity(Gravity.CENTER_VERTICAL);
+        autoRotateRow.setPadding(dp(12), dp(4), dp(12), dp(4));
+        ImageView autoRotateIcon = new ImageView(this);
+        autoRotateIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_navigation);
+        autoRotateRow.addView(autoRotateIcon,
+                new LinearLayout.LayoutParams(dp(28), dp(28)));
+        Switch autoRotate = new Switch(this);
+        autoRotate.setText("Автоповорот карты");
+        autoRotate.setTextSize(15);
+        autoRotate.setTextColor(Color.rgb(35, 35, 35));
+        autoRotate.setChecked(getSharedPreferences(SETTINGS, MODE_PRIVATE).getBoolean(
+                AppSettings.AUTO_ROTATE_MAP, AppSettings.DEFAULT_AUTO_ROTATE_MAP));
+        autoRotate.setOnCheckedChangeListener((button, enabled) ->
+                getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
+                        .putBoolean(AppSettings.AUTO_ROTATE_MAP, enabled).apply());
+        LinearLayout.LayoutParams autoRotateParams =
+                new LinearLayout.LayoutParams(0, -1, 1f);
+        autoRotateParams.setMargins(dp(14), 0, 0, 0);
+        autoRotateRow.addView(autoRotate, autoRotateParams);
+        content.addView(autoRotateRow, new LinearLayout.LayoutParams(-1, dp(54)));
 
         final LinearLayout mapKey = menuAction(
                 ru.gpsantiradar.app.R.drawable.ic_key, "Сменить ключ MapKit");

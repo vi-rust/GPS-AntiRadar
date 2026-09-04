@@ -37,6 +37,7 @@ public final class TrackingService extends Service implements LocationListener {
     public static final String EXTRA_ACCURACY = "accuracy";
     public static final String EXTRA_LATITUDE = "latitude";
     public static final String EXTRA_LONGITUDE = "longitude";
+    public static final String EXTRA_HEADING = "heading";
     public static final String EXTRA_ALERT_STATE = "alert_state";
     public static final String EXTRA_ALERT_ALGORITHM = "alert_algorithm";
 
@@ -181,6 +182,7 @@ public final class TrackingService extends Service implements LocationListener {
         update.putExtra(EXTRA_ACCURACY, location.getAccuracy());
         update.putExtra(EXTRA_LATITUDE, location.getLatitude());
         update.putExtra(EXTRA_LONGITUDE, location.getLongitude());
+        update.putExtra(EXTRA_HEADING, heading);
         update.putExtra(EXTRA_DISTANCE, nearest == null ? -1 : (int) Math.round(nearestDistance));
         update.putExtra(EXTRA_CAMERA, nearest == null ? "" : nearest.typeName());
         update.putExtra(EXTRA_CAMERA_ID, nearest == null ? -1L : nearest.id);
@@ -214,7 +216,7 @@ public final class TrackingService extends Service implements LocationListener {
         if (!gpsLocation && hasRecentGpsFix()) return;
 
         float speedKmh = speed(location);
-        float heading = heading(location);
+        float visualHeading = heading(location);
         double movementSinceScan = lastRadarScan == null ? Double.MAX_VALUE
                 : Geo.distanceMeters(lastRadarScan.getLatitude(), lastRadarScan.getLongitude(),
                 location.getLatitude(), location.getLongitude());
@@ -228,10 +230,11 @@ public final class TrackingService extends Service implements LocationListener {
                     location.getLongitude());
             proposedRadarHeading = Float.isNaN(radarHeading) ? measuredHeading
                     : averageHeading(radarHeading, measuredHeading);
-            heading = proposedRadarHeading;
-        } else if (!Float.isNaN(radarHeading)) {
-            heading = radarHeading;
         }
+        HeadingSelection headings = HeadingSelection.forStrelka(
+                visualHeading, radarHeading, proposedRadarHeading,
+                scanDecision.scanRequested, lastRadarScan != null);
+        float alertHeading = headings.alertHeading;
         int fallbackAlertDistance = configuredAlertDistance();
         int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
                 getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
@@ -256,16 +259,16 @@ public final class TrackingService extends Service implements LocationListener {
             int alertDistance = StrelkaAlertAlgorithm.activationDistance(
                     object, fallbackAlertDistance);
             boolean matchesZone = StrelkaAlertAlgorithm.matchesZone(object, distance,
-                    heading, bearing, fallbackAlertDistance);
+                    alertHeading, bearing, fallbackAlertDistance);
             boolean dropImmediately = StrelkaAlertAlgorithm.mustDropImmediately(
-                    object, speedKmh, distance, heading, bearing);
+                    object, speedKmh, distance, alertHeading, bearing);
             observations.add(new StrelkaAlertTracker.Observation(object,
                     (int) Math.round(distance), alertDistance,
                     matchesZone, dropImmediately));
 
             boolean relevant = !dropImmediately && (matchesZone
                     || StrelkaAlertAlgorithm.matchesDirectionForAcquisition(
-                    object, heading));
+                    object, alertHeading));
             if (relevant && distance < nearestDistance) {
                 nearest = object;
                 nearestDistance = distance;
@@ -303,7 +306,7 @@ public final class TrackingService extends Service implements LocationListener {
         String alertState = runAlertSequence(alertUpdate, speedKmh, overspeedThresholdKmh,
                 scanPerformed,
                 nearest, nearestDistance, nearestAlertDistance);
-        sendUpdate(location, speedKmh, nearest, nearestDistance,
+        sendUpdate(location, speedKmh, headings.visualHeading, nearest, nearestDistance,
                 nearestAlertDistance, alertState);
 
         String line = nearest == null ? Math.round(speedKmh) + " km/h"
@@ -424,13 +427,15 @@ public final class TrackingService extends Service implements LocationListener {
                 : Math.round(meters) + " м";
     }
 
-    private void sendUpdate(Location location, float speedKmh, CameraPoint nearest,
+    private void sendUpdate(Location location, float speedKmh, float heading,
+                            CameraPoint nearest,
                             double nearestDistance, int alertDistance, String alertState) {
         Intent update = new Intent(ACTION_UPDATE).setPackage(getPackageName());
         update.putExtra(EXTRA_SPEED, speedKmh);
         update.putExtra(EXTRA_ACCURACY, location.getAccuracy());
         update.putExtra(EXTRA_LATITUDE, location.getLatitude());
         update.putExtra(EXTRA_LONGITUDE, location.getLongitude());
+        update.putExtra(EXTRA_HEADING, heading);
         update.putExtra(EXTRA_DISTANCE,
                 nearest == null ? -1 : (int) Math.round(nearestDistance));
         update.putExtra(EXTRA_CAMERA, nearest == null ? "" : nearest.typeName());
