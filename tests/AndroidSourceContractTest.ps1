@@ -16,6 +16,7 @@ $updater = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\
 $listenerRegistry = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateListenerRegistry.java")
 $snapshot = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java")
 $snapshotAdapter = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshotIntent.java")
+$sharedMapLayer = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\SharedCameraMapLayer.java")
 
 Assert-Contains $database 'setWriteAheadLoggingEnabled\(true\)' "CameraDatabase must enable WAL for concurrent readers"
 Assert-Contains $database 'beginTransactionNonExclusive\(\)' "RadarBase replacement must use a non-exclusive WAL transaction"
@@ -42,8 +43,31 @@ if ($update -lt 0 -or $accept -lt $update) {
     throw "radar scan recovery was consumed before the tracker accepted the scan"
 }
 
-Assert-Contains $activity '\(north - south\) \* 0\.20' "latitude map-query padding must remain 20 percent"
-Assert-Contains $activity '\(east - west\) \* 0\.20' "longitude map-query padding must remain 20 percent"
+Assert-Contains $sharedMapLayer '\(north - south\) \* 0\.20' "latitude map-query padding must remain 20 percent"
+Assert-Contains $sharedMapLayer '\(east - west\) \* 0\.20' "longitude map-query padding must remain 20 percent"
+Assert-Contains $sharedMapLayer 'MapMarkerEntityDiff\.between' "shared map rendering must preserve world-anchored entity diffing"
+Assert-Contains $sharedMapLayer 'interface Host' "shared map rendering must expose host callbacks"
+foreach ($method in @("loadInitial", "refreshVisible", "updateCurrentLocation",
+        "moveToCurrentLocation", "zoomBy", "pauseFollowing", "resumeFollowing", "destroy")) {
+    Assert-Contains $sharedMapLayer ([regex]::Escape("void $method(")) "SharedCameraMapLayer must expose $method"
+}
+Assert-Contains $sharedMapLayer 'removeCameraListener' "destroy must remove the layer camera listener"
+Assert-Contains $sharedMapLayer 'generation == cameraLoadGeneration && !destroyed' "stale camera loads must not render after replacement or destroy"
+$initialLoadStart = $sharedMapLayer.IndexOf("public void loadInitial")
+$refreshVisibleStart = $sharedMapLayer.IndexOf("public void refreshVisible", $initialLoadStart)
+$initialLoad = if ($initialLoadStart -ge 0 -and $refreshVisibleStart -gt $initialLoadStart) {
+    $sharedMapLayer.Substring($initialLoadStart, $refreshVisibleStart - $initialLoadStart)
+} else { "" }
+Assert-Contains $initialLoad 'initialLoadGeneration' "the first viewport refresh must not cancel moveToData bounds loading"
+if ($initialLoad -match [regex]::Escape("++cameraLoadGeneration")) {
+    throw "loadInitial must not share the viewport generation canceled by MainActivity.onStart"
+}
+if ($sharedMapLayer -match 'cameraMarkerCollection\.clear\(\)|clusterPlacemarks\(') {
+    throw "shared camera markers must remain incremental and must not use MapKit clustering"
+}
+if ($activity -match 'renderedMarkerObjects|renderedMarkerEntities|renderCameraMarkers') {
+    throw "MainActivity must not own shared camera marker rendering"
+}
 
 $drivingReceiverStart = $activity.IndexOf("private final BroadcastReceiver receiver")
 $drivingReceiverEnd = $activity.IndexOf("private final BroadcastReceiver radarBaseReceiver",
