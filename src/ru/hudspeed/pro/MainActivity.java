@@ -804,9 +804,11 @@ public final class MainActivity extends Activity {
         if (mapView == null) return;
         com.yandex.mapkit.map.Map map = mapView.getMapWindow().getMap();
         ensureCameraCollections(map);
-        CameraMarkerDiff.Result coverageDiff = CameraMarkerDiff.between(renderedCameras, points);
+        List<CameraPoint> validPoints = MapMarkerLayout.validCameras(points);
+        CameraMarkerDiff.Result coverageDiff =
+                CameraMarkerDiff.between(renderedCameras, validPoints);
         List<MapMarkerLayout.Entity> entities =
-                MapMarkerLayout.create(points, map.getCameraPosition().getZoom());
+                MapMarkerLayout.create(validPoints, map.getCameraPosition().getZoom());
         MapMarkerEntityDiff.Result markerDiff =
                 MapMarkerEntityDiff.between(renderedMarkerEntities, entities);
         boolean showCoverage = map.getCameraPosition().getZoom() >= COVERAGE_MIN_ZOOM;

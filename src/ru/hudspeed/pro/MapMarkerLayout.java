@@ -17,15 +17,15 @@ public final class MapMarkerLayout {
     private MapMarkerLayout() {}
 
     public static List<Entity> create(List<CameraPoint> cameras, float zoom) {
-        if (cameras == null || cameras.isEmpty()) return Collections.emptyList();
+        List<CameraPoint> validCameras = validCameras(cameras);
+        if (validCameras.isEmpty()) return Collections.emptyList();
 
-        if (zoom >= INDIVIDUAL_ZOOM) return individualEntities(cameras);
+        if (zoom >= INDIVIDUAL_ZOOM) return individualEntities(validCameras);
 
         long floorZoom = (long) Math.floor(zoom);
         double worldSize = TILE_SIZE * Math.pow(2.0, floorZoom);
         Map<String, List<CameraPoint>> cells = new TreeMap<>();
-        for (CameraPoint camera : cameras) {
-            if (!isValid(camera)) continue;
+        for (CameraPoint camera : validCameras) {
             String key = clusterKey(camera, floorZoom, worldSize);
             List<CameraPoint> members = cells.get(key);
             if (members == null) {
@@ -48,10 +48,19 @@ public final class MapMarkerLayout {
         return Collections.unmodifiableList(entities);
     }
 
+    static List<CameraPoint> validCameras(List<CameraPoint> cameras) {
+        if (cameras == null || cameras.isEmpty()) return Collections.emptyList();
+        List<CameraPoint> result = new ArrayList<>();
+        for (CameraPoint camera : cameras) {
+            if (isValid(camera)) result.add(camera);
+        }
+        return Collections.unmodifiableList(result);
+    }
+
     private static List<Entity> individualEntities(List<CameraPoint> cameras) {
         Map<String, CameraPoint> sorted = new TreeMap<>();
         for (CameraPoint camera : cameras) {
-            if (isValid(camera)) sorted.put("camera:" + camera.id, camera);
+            sorted.put("camera:" + camera.id, camera);
         }
         List<Entity> entities = new ArrayList<>();
         for (CameraPoint camera : sorted.values()) entities.add(individual(camera));

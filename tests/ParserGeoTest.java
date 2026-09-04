@@ -276,6 +276,16 @@ public final class ParserGeoTest {
         check(MapMarkerLayout.create(Collections.singletonList(invalid), 10f).isEmpty(),
                 "invalid coordinates are skipped");
 
+        List<CameraPoint> validCameras = MapMarkerLayout.validCameras(java.util.Arrays.asList(
+                points.get(0),
+                null,
+                marker(405, Double.NaN, 37.0, 1),
+                marker(406, 55.0, Double.POSITIVE_INFINITY, 1),
+                marker(407, 90.00001, 37.0, 1),
+                marker(408, 55.0, -180.00001, 1)));
+        check(validCameras.size() == 1 && validCameras.get(0) == points.get(0),
+                "shared map input rejects every invalid coordinate");
+
         CameraPoint firstCentroidPoint = marker(409, 55.75, 37.61000, 1);
         firstCentroidPoint.latitude = Double.longBitsToDouble(4633042932285308929L);
         CameraPoint secondCentroidPoint = marker(410, 55.75, 37.61000, 1);
