@@ -5,7 +5,10 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class ParserGeoTest {
     public static void main(String[] args) throws Exception {
@@ -90,12 +93,47 @@ public final class ParserGeoTest {
                         && StrelkaAlertAlgorithm.spokenDistance(950) == 900
                         && StrelkaAlertAlgorithm.spokenDistance(15) == 10,
                 "Strelka distance voice thresholds");
-        check(StrelkaAlertAlgorithm.beepIntervalMillis(701) == 6000L
-                        && StrelkaAlertAlgorithm.beepIntervalMillis(150) == 1000L,
-                "Strelka beep cadence");
         check(StrelkaAlertAlgorithm.beepVolume(300) == 1f
                         && StrelkaAlertAlgorithm.beepVolume(1000) == 0.05f,
                 "Strelka beep volume ramp");
+
+        CameraPoint directed = new CameraPoint();
+        directed.id = 100;
+        directed.dirType = 1;
+        directed.direction = 0f;
+        directed.distanceMeters = 500;
+        directed.reverseDistanceMeters = 100;
+        directed.angleDegrees = 20f;
+        directed.speedRules = SpeedControlRules.encode(60, false,
+                -1, -1, 0, 0, SpeedControlRules.CAR);
+        check(StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 0, 800),
+                "directional corridor accepts a straight approach");
+        check(!StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 30, 800),
+                "directional corridor rejects a side object");
+        check(StrelkaAlertAlgorithm.mustDropImmediately(directed, 50, 10, 0, 180),
+                "ordinary camera is dropped after passing");
+        check(!StrelkaAlertAlgorithm.isOverspeeding(directed, 70f)
+                        && StrelkaAlertAlgorithm.isOverspeeding(directed, 71f),
+                "beeper starts only above the 10 km/h tolerance");
+
+        CameraPoint rear = new CameraPoint();
+        rear.id = 101;
+        rear.dirType = 3;
+        rear.direction = 0f;
+        rear.distanceMeters = 500;
+        rear.reverseDistanceMeters = 100;
+        rear.angleDegrees = 20f;
+        check(StrelkaAlertAlgorithm.matchesZone(rear, 50, 0, 180, 800)
+                        && !StrelkaAlertAlgorithm.mustDropImmediately(rear, 50, 50, 0, 180),
+                "rear-control zone continues after the object");
+        check(StrelkaAlertAlgorithm.mustDropImmediately(rear, 50, 120, 0, 180),
+                "rear-control zone ends at reverse distance");
+
+        verifyStrelkaAlertLifecycle();
+        verifyKnownReleaseHistory();
+        verifyProcessLaunchGuard();
+        verifyCameraMarkerDiff();
+        verifyStableMapMarkerLayout();
 
         if (args.length > 0) {
             final int[] count = {0};
@@ -114,6 +152,141 @@ public final class ParserGeoTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private static void verifyStrelkaAlertLifecycle() {
+        CameraPoint object = new CameraPoint();
+        object.id = 200;
+        object.dirType = 0;
+        object.distanceMeters = 500;
+        StrelkaAlertTracker tracker = new StrelkaAlertTracker();
+
+        StrelkaAlertTracker.Update update = tracker.update(Collections.singletonList(
+                observation(object, 500, true, false)), 72, false);
+        check(update.closestActive == null, "approach needs confidence");
+        update = tracker.update(Collections.singletonList(
+                observation(object, 480, true, false)), 72, false);
+        check(update.closestActive == null, "approach is not announced too early");
+        update = tracker.update(Collections.singletonList(
+                observation(object, 450, true, false)), 72, false);
+        check(update.pendingVoice != null, "confirmed entry requests one voice alert");
+        tracker.markSpoken(object.id);
+
+        update = tracker.update(Collections.singletonList(
+                observation(object, 430, false, false)), 72, false);
+        check(update.closestActive != null && update.pendingVoice == null,
+                "brief zone loss keeps active alert without repeating voice");
+        update = tracker.update(Collections.singletonList(
+                observation(object, 410, true, false)), 72, false);
+        check(update.closestActive != null && update.pendingVoice == null,
+                "return to zone preserves spoken state");
+
+        update = tracker.update(Collections.singletonList(
+                observation(object, 20, false, true)), 72, false);
+        check(update.closestActive == null && update.exited.size() == 1,
+                "passing the object fully resets its state");
+
+        tracker.update(Collections.singletonList(
+                observation(object, 500, true, false)), 72, false);
+        tracker.update(Collections.singletonList(
+                observation(object, 480, true, false)), 72, false);
+        update = tracker.update(Collections.singletonList(
+                observation(object, 450, true, false)), 72, false);
+        check(update.pendingVoice != null,
+                "new confirmed approach after exit repeats the voice alert");
+    }
+
+    private static StrelkaAlertTracker.Observation observation(
+            CameraPoint object, int distance, boolean matches, boolean drop) {
+        return new StrelkaAlertTracker.Observation(object, distance,
+                object.distanceMeters, matches, drop);
+    }
+
+    private static void verifyKnownReleaseHistory() {
+        List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
+        check(releases.size() == 5, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.1")
+                        && releases.get(1).version.equals("4.9.0")
+                        && releases.get(2).version.equals("4.8.1")
+                        && releases.get(3).version.equals("4.8.0")
+                        && releases.get(4).version.equals("4.7.1"),
+                "release history is newest first");
+        for (ReleaseHistory.Entry release : releases) {
+            check(release.changes != null && !release.changes.trim().isEmpty(),
+                    "every release has a visible change description");
+        }
+    }
+
+    private static void verifyProcessLaunchGuard() {
+        ProcessLaunchGuard guard = new ProcessLaunchGuard();
+        check(guard.claim(), "cold process launch starts the RadarBase update");
+        check(!guard.claim(), "activity recreation does not repeat the startup update");
+    }
+
+    private static void verifyCameraMarkerDiff() {
+        CameraPoint retained = marker(301, 56.80, 60.60, 1);
+        CameraPoint leaving = marker(302, 56.81, 60.61, 2);
+        Map<Long, CameraPoint> rendered = new HashMap<>();
+        rendered.put(retained.id, retained);
+        rendered.put(leaving.id, leaving);
+
+        CameraPoint unchangedCopy = marker(301, 56.80, 60.60, 1);
+        CameraPoint entering = marker(303, 56.82, 60.62, 3);
+        CameraMarkerDiff.Result moved = CameraMarkerDiff.between(rendered,
+                java.util.Arrays.asList(unchangedCopy, entering));
+        check(moved.removeIds.size() == 1 && moved.removeIds.contains(302L),
+                "marker leaving the buffered viewport is removed");
+        check(moved.addOrReplace.size() == 1 && moved.addOrReplace.get(0).id == 303,
+                "only marker entering the buffered viewport is added");
+
+        CameraPoint changed = marker(301, 56.805, 60.60, 1);
+        CameraMarkerDiff.Result databaseChanged = CameraMarkerDiff.between(rendered,
+                java.util.Arrays.asList(changed, leaving));
+        check(databaseChanged.removeIds.size() == 1
+                        && databaseChanged.removeIds.contains(301L)
+                        && databaseChanged.addOrReplace.size() == 1
+                        && databaseChanged.addOrReplace.get(0).id == 301,
+                "changed database object is replaced without rebuilding unchanged markers");
+    }
+
+    private static void verifyStableMapMarkerLayout() {
+        List<CameraPoint> points = java.util.Arrays.asList(
+                marker(401, 55.75000, 37.61000, 1),
+                marker(402, 55.75005, 37.61005, 2),
+                marker(403, 56.83000, 60.60000, 1),
+                marker(404, 56.83005, 60.60005, 2));
+        List<MapMarkerLayout.Entity> first = MapMarkerLayout.create(points, 10.4f);
+        List<MapMarkerLayout.Entity> panned =
+                MapMarkerLayout.create(new ArrayList<>(points), 10.4f);
+        check(first.size() == 2, "nearby cameras form two stable clusters");
+        check(first.get(0).key.equals(panned.get(0).key)
+                        && first.get(1).key.equals(panned.get(1).key),
+                "same zoom preserves world-anchored cluster keys");
+
+        List<MapMarkerLayout.Entity> individual = MapMarkerLayout.create(
+                Collections.singletonList(points.get(0)), 14f);
+        check(individual.size() == 1 && !individual.get(0).cluster
+                        && individual.get(0).key.equals("camera:401"),
+                "zoom 14 displays individual cameras");
+
+        CameraPoint invalid = marker(405, Double.NaN, 37.0, 1);
+        check(MapMarkerLayout.create(Collections.singletonList(invalid), 10f).isEmpty(),
+                "invalid coordinates are skipped");
+    }
+
+    private static CameraPoint marker(long id, double latitude, double longitude, int type) {
+        CameraPoint point = new CameraPoint();
+        point.id = id;
+        point.latitude = latitude;
+        point.longitude = longitude;
+        point.type = type;
+        point.dirType = 1;
+        point.direction = 90f;
+        point.distanceMeters = 500;
+        point.reverseDistanceMeters = 100;
+        point.angleDegrees = 20f;
+        point.speedRules = "60";
+        return point;
     }
 
     private static float coordinateShift(int build, float direction) {

@@ -19,6 +19,11 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseTypes.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\SpeedControlRules.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\StrelkaAlertAlgorithm.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\StrelkaAlertTracker.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\ReleaseHistory.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\ProcessLaunchGuard.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\CameraMarkerDiff.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerLayout.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseParser.java") `
     (Join-Path $Project "tests\ParserGeoTest.java")
 if ($LASTEXITCODE -ne 0) { throw "Tests did not compile" }
