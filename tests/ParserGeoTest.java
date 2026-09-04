@@ -371,6 +371,41 @@ public final class ParserGeoTest {
                 "moving an individual camera updates its stable entity");
         check(diff.update.get(0).key.equals("camera:401"),
                 "moved camera preserves its individual key");
+
+        MapMarkerLayout.Entity firstIndividual = individualEntity(
+                marker(401, 55.75000, 37.61000, 1));
+        MapMarkerLayout.Entity secondIndividual = individualEntity(
+                marker(402, 55.75005, 37.61005, 2));
+        MapMarkerEntityDiff.Result addOnly = MapMarkerEntityDiff.between(
+                Collections.<String, MapMarkerLayout.Entity>emptyMap(),
+                Collections.singletonList(firstIndividual));
+        check(addOnly.removeKeys.isEmpty() && addOnly.update.isEmpty()
+                        && addOnly.add.size() == 1 && addOnly.add.get(0) == firstIndividual,
+                "new stable entity is added without removals or updates");
+
+        Map<String, MapMarkerLayout.Entity> reverseRendered = new LinkedHashMap<>();
+        reverseRendered.put(secondIndividual.key, secondIndividual);
+        reverseRendered.put(firstIndividual.key, firstIndividual);
+        MapMarkerEntityDiff.Result removeOnly = MapMarkerEntityDiff.between(reverseRendered,
+
+                Collections.<MapMarkerLayout.Entity>emptyList());
+        check(removeOnly.add.isEmpty() && removeOnly.update.isEmpty()
+                        && removeOnly.removeKeys.equals(java.util.Arrays.asList(
+                                "camera:401", "camera:402")),
+                "removed keys are sorted independently of rendered map order");
+
+        checkUnsupported(new Runnable() {
+            @Override public void run() { addOnly.removeKeys.add("camera:999"); }
+        }, "remove keys result is immutable");
+        checkUnsupported(new Runnable() {
+            @Override public void run() { addOnly.add.clear(); }
+        }, "add result is immutable");
+        checkUnsupported(new Runnable() {
+            @Override public void run() { addOnly.update.add(firstIndividual); }
+        }, "update result is immutable");
+        checkUnsupported(new Runnable() {
+            @Override public void run() { addOnly.desired.clear(); }
+        }, "desired result is immutable");
     }
 
     private static Map<String, MapMarkerLayout.Entity> entitiesByKey(
@@ -386,6 +421,16 @@ public final class ParserGeoTest {
             if (entity.memberIds.contains(memberId)) return entity.key;
         }
         throw new AssertionError("missing member " + memberId);
+    }
+
+    private static void checkUnsupported(Runnable action, String message) {
+        boolean unsupported = false;
+        try {
+            action.run();
+        } catch (UnsupportedOperationException expected) {
+            unsupported = true;
+        }
+        check(unsupported, message);
     }
     private static MapMarkerLayout.Entity individualEntity(CameraPoint camera) {
         return MapMarkerLayout.create(Collections.singletonList(camera), 14f).get(0);

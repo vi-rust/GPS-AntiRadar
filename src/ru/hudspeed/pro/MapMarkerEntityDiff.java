@@ -1,6 +1,7 @@
 package ru.gpsantiradar.app;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,7 @@ public final class MapMarkerEntityDiff {
         for (String key : rendered.keySet()) {
             if (!desired.containsKey(key)) removeKeys.add(key);
         }
+        Collections.sort(removeKeys);
 
         List<MapMarkerLayout.Entity> add = new ArrayList<>();
         List<MapMarkerLayout.Entity> update = new ArrayList<>();
@@ -42,10 +44,10 @@ public final class MapMarkerEntityDiff {
         Result(List<String> removeKeys, List<MapMarkerLayout.Entity> add,
                List<MapMarkerLayout.Entity> update,
                Map<String, MapMarkerLayout.Entity> desired) {
-            this.removeKeys = removeKeys;
-            this.add = add;
-            this.update = update;
-            this.desired = desired;
+            this.removeKeys = Collections.unmodifiableList(new ArrayList<>(removeKeys));
+            this.add = Collections.unmodifiableList(new ArrayList<>(add));
+            this.update = Collections.unmodifiableList(new ArrayList<>(update));
+            this.desired = Collections.unmodifiableMap(new LinkedHashMap<>(desired));
         }
     }
 }
