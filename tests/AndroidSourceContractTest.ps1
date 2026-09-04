@@ -211,4 +211,25 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
     $activity.Substring($onResumeStart, $onResumeEnd - $onResumeStart)
 } else { "" }
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
+
+$buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
+foreach ($dependency in @(
+        "implementation 'androidx.car.app:app:1.7.0'",
+        "implementation 'androidx.car.app:app-projected:1.7.0'",
+        "testImplementation 'androidx.car.app:app-testing:1.7.0'",
+        "testImplementation 'androidx.test:core:1.6.1'",
+        "testImplementation 'junit:junit:4.13.2'",
+        "testImplementation 'org.robolectric:robolectric:4.16.1'")) {
+    Assert-Contains -Text $buildGradle -Pattern ([regex]::Escape($dependency)) -Message "Android Auto dependency is missing: $dependency"
+}
+
+$automotiveDescriptorPath = Join-Path $Project "res\xml\automotive_app_desc.xml"
+if (-not (Test-Path $automotiveDescriptorPath)) {
+    throw "Android Auto automotive descriptor is missing"
+}
+$automotiveDescriptor = [xml](Get-Content -Raw -Encoding UTF8 $automotiveDescriptorPath)
+if ($automotiveDescriptor.automotiveApp.uses.name -ne "template") {
+    throw "Android Auto descriptor must declare the template app category"
+}
+
 Write-Output "AndroidSourceContractTest: OK"
