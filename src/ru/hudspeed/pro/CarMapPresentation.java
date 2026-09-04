@@ -155,15 +155,15 @@ public final class CarMapPresentation {
     }
 
     public void onStableAreaChanged(Rect area) {
-        if (destroyed || area == null || area.isEmpty()) return;
-        stableArea = new Rect(area);
+        if (destroyed) return;
+        stableArea = area == null || area.isEmpty() ? null : new Rect(area);
         applyStableArea();
         root.post(this::applyStableArea);
     }
 
     public void onVisibleAreaChanged(Rect area) {
-        if (destroyed || area == null || area.isEmpty()) return;
-        visibleArea = new Rect(area);
+        if (destroyed) return;
+        visibleArea = area == null || area.isEmpty() ? null : new Rect(area);
         applyVisibleArea();
         root.post(this::applyVisibleArea);
     }
@@ -260,7 +260,16 @@ public final class CarMapPresentation {
     }
 
     private void applyStableArea() {
-        if (destroyed || stableArea == null || stableArea.isEmpty()) return;
+        if (destroyed) return;
+        if (stableArea == null || stableArea.isEmpty()) {
+            FrameLayout.LayoutParams params =
+                    (FrameLayout.LayoutParams) hudPanel.getLayoutParams();
+            params.leftMargin = dp(8);
+            params.bottomMargin = dp(8);
+            params.width = dp(300);
+            hudPanel.setLayoutParams(params);
+            return;
+        }
         Rect area = stableArea;
         FrameLayout.LayoutParams params =
                 (FrameLayout.LayoutParams) hudPanel.getLayoutParams();
@@ -274,9 +283,12 @@ public final class CarMapPresentation {
     }
 
     private void applyVisibleArea() {
-        if (destroyed || visibleArea == null || visibleArea.isEmpty()
-                || mapView == null) return;
+        if (destroyed || mapView == null) return;
         MapWindow mapWindow = mapView.getMapWindow();
+        if (visibleArea == null || visibleArea.isEmpty()) {
+            mapWindow.setFocusRect(null);
+            return;
+        }
         int width = mapWindow.width();
         int height = mapWindow.height();
         if (width <= 0 || height <= 0) return;

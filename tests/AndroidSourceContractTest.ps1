@@ -339,15 +339,21 @@ Assert-Contains $surfaceController 'implements SurfaceCallback' "Car controller 
 Assert-Contains $surfaceController 'setSurfaceCallback\(this\)' "Car controller must register its surface callback"
 Assert-Contains $surfaceController 'setSurfaceCallback\(null\)' "Car controller destroy must clear its callback"
 Assert-Contains $surfaceController 'Surface::release' "production must release every host Surface"
-Assert-Contains $surfaceController 'IdentityHashMap' "surface ownership must use identity-safe tokens"
-Assert-Contains $surfaceController 'Objects\.equals\(surface,\s*candidate\)' "surface destruction must use safe equality"
-if ($surfaceController -match 'getSurface\(\)\s*==') {
-    throw "surface destruction must not rely only on reference equality"
+if ($surfaceController -match 'IdentityHashMap|IdentityHashSet|releasedSurfaces|surfaceTokens') {
+    throw "surface ownership must not retain wrapper references in identity collections"
 }
+Assert-Contains $surfaceController 'surfaceResource != null && activeSurface == surface' "an exact repeated wrapper must not be released and passed back to the factory"
+Assert-Contains $surfaceController 'Surface ownedSurface = activeSurface' "surface destruction must follow the ordered callback contract"
+Assert-Contains $surfaceController 'callbackSurface != ownedSurface' "a distinct destroy wrapper must also be released"
+Assert-Contains $surfaceController '!activeSpec\.equals\(callbackSpec\)' "different-spec stale destroy must not release the replacement"
 Assert-Contains $surfaceController 'catch \(RuntimeException \| LinkageError error\)' "surface creation failures must be contained"
 Assert-Contains $surfaceController 'notifySurfaceFailure\(error\)' "surface creation failures must notify the session"
-if ([regex]::Matches($surfaceController, 'area == null \|\| area\.isEmpty\(\)').Count -lt 2) {
-    throw "empty stable and visible rectangles must remain unknown"
+if ($surfaceController -match 'private Rect (?:stableArea|visibleArea)') {
+    throw "safe-area rectangles must not survive their surface generation"
+}
+if ([regex]::Matches($surfaceController,
+        'area == null \|\| area\.isEmpty\(\) \? null : new Rect\(area\)').Count -lt 2) {
+    throw "empty stable and visible rectangles must clear the active generation"
 }
 $releaseIndex = $surfaceController.IndexOf("releaseSurface()")
 $createIndex = $surfaceController.IndexOf("surfaceFactory.create", $releaseIndex)
@@ -383,9 +389,14 @@ if ($carPresentation -match 'alertAlgorithm') {
 }
 Assert-Contains $carPresentation 'onStableAreaChanged' "Car HUD must respond to stable-area changes"
 Assert-Contains $carPresentation 'onVisibleAreaChanged' "Car map must respond to visible-area changes"
-if ([regex]::Matches($carPresentation, 'area == null \|\| area\.isEmpty\(\)').Count -lt 2) {
-    throw "Car presentation must ignore empty safe-area rectangles"
+if ([regex]::Matches($carPresentation,
+        'area == null \|\| area\.isEmpty\(\) \? null : new Rect\(area\)').Count -lt 2) {
+    throw "Car presentation must clear empty safe-area rectangles"
 }
+Assert-Contains $carPresentation 'params\.leftMargin = dp\(8\)' "empty stable area must restore the default HUD inset"
+Assert-Contains $carPresentation 'params\.bottomMargin = dp\(8\)' "empty stable area must restore the default HUD bottom inset"
+Assert-Contains $carPresentation 'params\.width = dp\(300\)' "empty stable area must restore the default HUD width"
+Assert-Contains $carPresentation 'mapWindow\.setFocusRect\(null\)' "empty visible area must clear the MapKit focus rect"
 Assert-Contains $carPresentation 'isDarkMode' "Car HUD must follow car dark mode"
 Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
 Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"

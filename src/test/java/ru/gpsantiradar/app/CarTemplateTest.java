@@ -9,7 +9,9 @@ import static org.junit.Assert.fail;
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
+import android.view.View;
 import android.view.Surface;
+import android.widget.FrameLayout;
 
 import androidx.car.app.CarContext;
 import androidx.car.app.AppManager;
@@ -29,9 +31,7 @@ import org.robolectric.Robolectric;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 
 @RunWith(RobolectricTestRunner.class)
 public final class CarTemplateTest {
@@ -108,36 +108,60 @@ public final class CarTemplateTest {
         replacement.close();
     }
 
-    @Test public void staleDestroyDoesNotReleaseReplacementAndDestroyIsIdempotent() {
+    @Test public void destroyWithDifferentWrapperReleasesCurrentOrderedSurface() {
         CarContext carContext = carContext();
         List<String> events = new ArrayList<>();
         RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
-        TestSurface oldSurfaceObject = new TestSurface();
-        TestSurface replacementObject = new TestSurface();
+        TestSurface testSurface = new TestSurface();
+        Surface activeWrapper = testSurface.surface;
+        Surface destroyWrapper = testSurface.newWrapper();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null,
+                (spec, surface) -> new RecordingSurfaceResource(events),
+                surfaces, message -> fail(message));
+
+        controller.onSurfaceAvailable(
+                new SurfaceContainer(activeWrapper, 800, 480, 160));
+        controller.onSurfaceDestroyed(
+                new SurfaceContainer(destroyWrapper, 800, 480, 160));
+        controller.destroy();
+        controller.destroy();
+
+        assertFalse(activeWrapper == destroyWrapper);
+        assertEquals(Arrays.asList("release"), events);
+        assertEquals(1, surfaces.releaseCount(activeWrapper));
+        assertEquals(1, surfaces.releaseCount(destroyWrapper));
+        testSurface.close();
+    }
+
+    @Test public void staleDifferentSpecDestroyDoesNotReleaseReplacement() {
+        CarContext carContext = carContext();
+        List<String> events = new ArrayList<>();
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface oldSurface = new TestSurface();
+        TestSurface replacement = new TestSurface();
         CarSurfaceController controller = new CarSurfaceController(
                 carContext, null, (spec, surface) -> {
                     events.add("create:" + spec.width);
                     return new NamedSurfaceResource(events, spec.width);
                 }, surfaces, message -> fail(message));
-        SurfaceContainer oldSurface = new SurfaceContainer(
-                oldSurfaceObject.surface, 800, 480, 160);
-        SurfaceContainer replacement = new SurfaceContainer(
-                replacementObject.surface, 1280, 720, 240);
+        SurfaceContainer oldContainer = new SurfaceContainer(
+                oldSurface.surface, 800, 480, 160);
 
-        controller.onSurfaceAvailable(oldSurface);
-        controller.onSurfaceAvailable(replacement);
-        controller.onSurfaceDestroyed(oldSurface);
+        controller.onSurfaceAvailable(oldContainer);
+        controller.onSurfaceAvailable(new SurfaceContainer(
+                replacement.surface, 1280, 720, 240));
+        controller.onSurfaceDestroyed(oldContainer);
         controller.zoomBy(1f);
-        controller.destroy();
         controller.destroy();
 
         assertEquals(Arrays.asList(
                 "create:800", "release:800", "create:1280",
                 "zoom:1280", "release:1280"), events);
-        assertEquals(1, surfaces.releaseCount(oldSurfaceObject.surface));
-        assertEquals(1, surfaces.releaseCount(replacementObject.surface));
-        oldSurfaceObject.close();
-        replacementObject.close();
+        assertEquals(2, surfaces.releaseCount(oldSurface.surface));
+        assertEquals(1, surfaces.releaseCount(replacement.surface));
+        oldSurface.close();
+        replacement.close();
     }
 
     @Test public void activeSurfaceDestroyReleasesResourceAndSurfaceOnce() {
@@ -154,11 +178,63 @@ public final class CarTemplateTest {
 
         controller.onSurfaceAvailable(container);
         controller.onSurfaceDestroyed(container);
-        controller.onSurfaceDestroyed(container);
 
         assertEquals(Arrays.asList("release"), events);
         assertEquals(1, surfaces.releaseCount(testSurface.surface));
         controller.destroy();
+        controller.destroy();
+        testSurface.close();
+    }
+
+    @Test public void repeatedAvailabilityUsesFreshWrapperWithoutDoubleUse() {
+        CarContext carContext = carContext();
+        List<Surface> factorySurfaces = new ArrayList<>();
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface testSurface = new TestSurface();
+        Surface firstWrapper = testSurface.surface;
+        Surface secondWrapper = testSurface.newWrapper();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    assertTrue("factory received a released Surface", surface.isValid());
+                    factorySurfaces.add(surface);
+                    return new NoOpSurfaceResource();
+                }, surfaces, message -> fail(message));
+
+        controller.onSurfaceAvailable(
+                new SurfaceContainer(firstWrapper, 800, 480, 160));
+        controller.onSurfaceAvailable(
+                new SurfaceContainer(secondWrapper, 800, 480, 160));
+
+        assertFalse(firstWrapper == secondWrapper);
+        assertEquals(Arrays.asList(firstWrapper, secondWrapper), factorySurfaces);
+        assertEquals(1, surfaces.releaseCount(firstWrapper));
+        assertEquals(0, surfaces.releaseCount(secondWrapper));
+        controller.destroy();
+        assertEquals(1, surfaces.releaseCount(secondWrapper));
+        testSurface.close();
+    }
+
+    @Test public void exactRepeatedSurfaceIsNotReleasedAndReused() {
+        CarContext carContext = carContext();
+        int[] creates = { 0 };
+        RecordingSurfaceReleaser surfaces = new RecordingSurfaceReleaser();
+        TestSurface testSurface = new TestSurface();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    assertTrue("factory received a released Surface", surface.isValid());
+                    creates[0]++;
+                    return new NoOpSurfaceResource();
+                }, surfaces, message -> fail(message));
+        SurfaceContainer container = new SurfaceContainer(
+                testSurface.surface, 800, 480, 160);
+
+        controller.onSurfaceAvailable(container);
+        controller.onSurfaceAvailable(container);
+
+        assertEquals(1, creates[0]);
+        assertEquals(0, surfaces.releaseCount(testSurface.surface));
+        controller.destroy();
+        assertEquals(1, surfaces.releaseCount(testSurface.surface));
         testSurface.close();
     }
 
@@ -227,12 +303,16 @@ public final class CarTemplateTest {
         testSurface.close();
     }
 
-    @Test public void emptyAreasRemainUnknownAndAreNotForwarded() {
+    @Test public void emptyAreasClearActiveGenerationAndAreNotReplayed() {
         CarContext carContext = carContext();
-        AreaRecordingSurfaceResource resource =
-                new AreaRecordingSurfaceResource();
+        List<AreaRecordingSurfaceResource> resources = new ArrayList<>();
         CarSurfaceController controller = new CarSurfaceController(
-                carContext, null, (spec, surface) -> resource);
+                carContext, null, (spec, surface) -> {
+                    AreaRecordingSurfaceResource resource =
+                            new AreaRecordingSurfaceResource();
+                    resources.add(resource);
+                    return resource;
+                });
 
         controller.onStableAreaChanged(new Rect());
         controller.onVisibleAreaChanged(new Rect());
@@ -241,12 +321,67 @@ public final class CarTemplateTest {
         controller.onVisibleAreaChanged(new Rect(20, 20, 780, 460));
         controller.onStableAreaChanged(new Rect());
         controller.onVisibleAreaChanged(new Rect());
+        controller.onSurfaceAvailable(new SurfaceContainer(null, 1280, 720, 240));
 
-        assertEquals(1, resource.stableAreas.size());
-        assertEquals(new Rect(10, 10, 790, 470), resource.stableAreas.get(0));
-        assertEquals(1, resource.visibleAreas.size());
-        assertEquals(new Rect(20, 20, 780, 460), resource.visibleAreas.get(0));
+        assertEquals(2, resources.size());
+        assertEquals(Arrays.asList(new Rect(10, 10, 790, 470), null),
+                resources.get(0).stableAreas);
+        assertEquals(Arrays.asList(new Rect(20, 20, 780, 460), null),
+                resources.get(0).visibleAreas);
+        assertTrue(resources.get(1).stableAreas.isEmpty());
+        assertTrue(resources.get(1).visibleAreas.isEmpty());
         controller.destroy();
+    }
+
+    @Test public void validAreasAreNotReplayedToReplacementGeneration() {
+        CarContext carContext = carContext();
+        List<AreaRecordingSurfaceResource> resources = new ArrayList<>();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    AreaRecordingSurfaceResource resource =
+                            new AreaRecordingSurfaceResource();
+                    resources.add(resource);
+                    return resource;
+                });
+
+        controller.onSurfaceAvailable(new SurfaceContainer(null, 800, 480, 160));
+        controller.onStableAreaChanged(new Rect(10, 10, 790, 470));
+        controller.onVisibleAreaChanged(new Rect(20, 20, 780, 460));
+        controller.onSurfaceAvailable(new SurfaceContainer(null, 1280, 720, 240));
+
+        assertEquals(2, resources.size());
+        assertEquals(Arrays.asList(new Rect(10, 10, 790, 470)),
+                resources.get(0).stableAreas);
+        assertEquals(Arrays.asList(new Rect(20, 20, 780, 460)),
+                resources.get(0).visibleAreas);
+        assertTrue(resources.get(1).stableAreas.isEmpty());
+        assertTrue(resources.get(1).visibleAreas.isEmpty());
+        controller.destroy();
+    }
+
+    @Test public void emptyStableAreaRestoresDefaultHudLayout() {
+        Context context = ApplicationProvider.getApplicationContext();
+        CarMapPresentation presentation =
+                new CarMapPresentation(context, null, carContext());
+        FrameLayout root = (FrameLayout) presentation.rootView();
+        View hud = root.getChildAt(0);
+        FrameLayout.LayoutParams defaults =
+                (FrameLayout.LayoutParams) hud.getLayoutParams();
+        int defaultLeft = defaults.leftMargin;
+        int defaultBottom = defaults.bottomMargin;
+        int defaultWidth = defaults.width;
+
+        presentation.onStableAreaChanged(new Rect(100, 20, 700, 400));
+        assertTrue(((FrameLayout.LayoutParams) hud.getLayoutParams()).leftMargin
+                > defaultLeft);
+        presentation.onStableAreaChanged(new Rect());
+
+        FrameLayout.LayoutParams reset =
+                (FrameLayout.LayoutParams) hud.getLayoutParams();
+        assertEquals(defaultLeft, reset.leftMargin);
+        assertEquals(defaultBottom, reset.bottomMargin);
+        assertEquals(defaultWidth, reset.width);
+        presentation.destroy();
     }
 
     private static CarContext carContext() {
@@ -324,17 +459,17 @@ public final class CarTemplateTest {
         final List<Rect> visibleAreas = new ArrayList<>();
 
         @Override public void onStableAreaChanged(Rect area) {
-            stableAreas.add(new Rect(area));
+            stableAreas.add(area == null ? null : new Rect(area));
         }
 
         @Override public void onVisibleAreaChanged(Rect area) {
-            visibleAreas.add(new Rect(area));
+            visibleAreas.add(area == null ? null : new Rect(area));
         }
     }
 
     private static final class RecordingSurfaceReleaser
             implements CarSurfaceController.SurfaceReleaser {
-        private final Map<Surface, Integer> releaseCounts = new IdentityHashMap<>();
+        private final List<Surface> releasedSurfaces = new ArrayList<>();
         private final List<String> events;
         private Surface firstSurface;
 
@@ -348,7 +483,7 @@ public final class CarTemplateTest {
 
         @Override public void release(Surface surface) {
             if (firstSurface == null) firstSurface = surface;
-            releaseCounts.put(surface, releaseCount(surface) + 1);
+            releasedSurfaces.add(surface);
             if (events != null) {
                 events.add(surface == firstSurface ? "surface:old" : "surface:new");
             }
@@ -356,17 +491,27 @@ public final class CarTemplateTest {
         }
 
         int releaseCount(Surface surface) {
-            Integer count = releaseCounts.get(surface);
-            return count == null ? 0 : count;
+            int count = 0;
+            for (Surface released : releasedSurfaces) {
+                if (released == surface) count++;
+            }
+            return count;
         }
     }
 
     private static final class TestSurface {
         final SurfaceTexture texture = new SurfaceTexture(0);
-        final Surface surface = new Surface(texture);
+        final List<Surface> wrappers = new ArrayList<>();
+        final Surface surface = newWrapper();
+
+        Surface newWrapper() {
+            Surface wrapper = new Surface(texture);
+            wrappers.add(wrapper);
+            return wrapper;
+        }
 
         void close() {
-            surface.release();
+            for (Surface wrapper : wrappers) wrapper.release();
             texture.release();
         }
     }
