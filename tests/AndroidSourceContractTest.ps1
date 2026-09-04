@@ -260,6 +260,7 @@ Assert-Contains $readme '\u0441\u0435\u0440\u0432\u0435\u0440 \u0433\u043e\u043b
 Assert-Contains $readme 'LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb\.exe' "README must define the SDK adb executable for DHU"
 Assert-Contains $readme '\& \$adb forward tcp:5277 tcp:5277' "README must forward the DHU port through adb"
 Assert-Contains $readme 'desktop-head-unit\.exe' "README must start the DHU executable"
+Assert-Contains $readme '(?m)^\&\s+\$dhu\s*$' "README must actively launch DHU through its command variable"
 
 $automotiveDescriptorPath = Join-Path $Project "res\xml\automotive_app_desc.xml"
 if (-not (Test-Path $automotiveDescriptorPath)) {
