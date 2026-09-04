@@ -48,7 +48,8 @@ public final class SharedCameraMapLayer {
     private static final long FOLLOW_PAUSE_MS = 7000L;
     private static final int GREEN = Color.rgb(0, 166, 82);
 
-    private Context context;
+    private Context queryContext;
+    private Context resourceContext;
     private MapWindow mapWindow;
     private Host host;
     private com.yandex.mapkit.map.Map map;
@@ -104,7 +105,8 @@ public final class SharedCameraMapLayer {
         if (context == null) throw new IllegalArgumentException("context is required");
         if (mapWindow == null) throw new IllegalArgumentException("mapWindow is required");
         if (host == null) throw new IllegalArgumentException("host is required");
-        this.context = context.getApplicationContext();
+        this.queryContext = context.getApplicationContext();
+        this.resourceContext = context;
         this.mapWindow = mapWindow;
         this.host = host;
         map = mapWindow.getMap();
@@ -116,7 +118,7 @@ public final class SharedCameraMapLayer {
 
     public void loadInitial(final boolean moveToData) {
         if (destroyed) return;
-        final Context queryContext = context;
+        final Context queryContext = this.queryContext;
         if (queryContext == null) return;
         final int generation = ++initialLoadGeneration;
         new Thread(new Runnable() {
@@ -148,7 +150,7 @@ public final class SharedCameraMapLayer {
 
     public void refreshVisible() {
         com.yandex.mapkit.map.Map activeMap = map;
-        final Context queryContext = context;
+        final Context queryContext = this.queryContext;
         if (destroyed || activeMap == null || queryContext == null) return;
         final VisibleRegion region;
         try {
@@ -271,7 +273,8 @@ public final class SharedCameraMapLayer {
         map = null;
         mapWindow = null;
         host = null;
-        context = null;
+        queryContext = null;
+        resourceContext = null;
     }
 
     private void removeOwnedCollection(MapObjectCollection collection) {
@@ -516,8 +519,8 @@ public final class SharedCameraMapLayer {
     private int cameraIconResource(int type) {
         Integer cached = markerResources.get(type);
         if (cached != null) return cached;
-        int resourceId = context.getResources().getIdentifier(
-                "cam_type_" + type, "drawable", context.getPackageName());
+        int resourceId = resourceContext.getResources().getIdentifier(
+                "cam_type_" + type, "drawable", resourceContext.getPackageName());
         if (resourceId == 0) resourceId = R.drawable.cam_type_0;
         markerResources.put(type, resourceId);
         return resourceId;
@@ -527,8 +530,10 @@ public final class SharedCameraMapLayer {
         int size = dp(42);
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
-        Drawable drawable = context.getDrawable(resourceId);
-        if (drawable == null) drawable = context.getDrawable(R.drawable.cam_type_0);
+        Drawable drawable = resourceContext.getDrawable(resourceId);
+        if (drawable == null) {
+            drawable = resourceContext.getDrawable(R.drawable.cam_type_0);
+        }
         if (drawable != null) {
             drawable.setBounds(0, 0, size, size);
             drawable.draw(canvas);
@@ -609,10 +614,11 @@ public final class SharedCameraMapLayer {
     }
 
     private int dp(int value) {
-        return Math.round(value * context.getResources().getDisplayMetrics().density);
+        return Math.round(value
+                * resourceContext.getResources().getDisplayMetrics().density);
     }
 
     private float dp(float value) {
-        return value * context.getResources().getDisplayMetrics().density;
+        return value * resourceContext.getResources().getDisplayMetrics().density;
     }
 }

@@ -71,7 +71,11 @@ foreach ($method in @("loadInitial", "refreshVisible", "updateCurrentLocation",
 }
 Assert-Contains $sharedMapLayer 'removeCameraListener' "destroy must remove the layer camera listener"
 Assert-Contains $sharedMapLayer 'generation == cameraLoadGeneration && !destroyed' "stale camera loads must not render after replacement or destroy"
-Assert-Contains $sharedMapLayer 'this\.context = context\.getApplicationContext\(\);' "async map work must not retain an Activity context"
+Assert-Contains $sharedMapLayer 'this\.queryContext = context\.getApplicationContext\(\);' "async map work must retain only the application context"
+Assert-Contains $sharedMapLayer 'this\.resourceContext = context;' "map resources must retain the display-aware context"
+Assert-Contains $sharedMapLayer 'new CameraDatabase\(queryContext\)' "database work must use the application context"
+Assert-Contains $sharedMapLayer 'resourceContext\.getResources\(\)' "marker dimensions must use display-aware resources"
+Assert-Contains $sharedMapLayer 'resourceContext\.getDrawable\(' "marker drawables must use the display-aware context"
 Assert-Contains $sharedMapLayer 'updateCurrentLocation\(double latitude, double longitude, float speedKmh\)' "location updates must name the movement input speedKmh"
 Assert-Contains $sharedMapLayer 'mapCenteredOnGps && speedKmh < 1f' "stationary updates below 1 km/h must not keep moving the followed map"
 Assert-Contains $activity 'snapshot\.latitude, snapshot\.longitude, snapshot\.speedKmh' "phone map following must use snapshot speed"
@@ -336,6 +340,8 @@ foreach ($sourceName in $requiredCarSources) {
 }
 $carService = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "GpsCarAppService.java")
 $carSession = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "GpsCarSession.java")
+$carUpdateNotifier = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarRadarBaseUpdateNotifier.java")
 $surfaceController = Get-Content -Raw -Encoding UTF8 (
         Join-Path $carSourceRoot "CarSurfaceController.java")
 $carPresentation = Get-Content -Raw -Encoding UTF8 (
@@ -365,6 +371,14 @@ if ($carSession -match 'new\s+RadarBaseUpdater|new\s+StrelkaAlertTracker') {
     throw "Car session must not create a second updater or alert tracker"
 }
 Assert-Contains $carSession 'DrivingSnapshotIntent\.from' "Car session must decode shared tracking snapshots"
+Assert-Contains $carSession 'filter\.addAction\(RadarBaseUpdater\.ACTION_DATABASE_UPDATED\)' "Car session must subscribe to successful database replacements"
+Assert-Contains $carSession 'RadarBaseUpdater\.ACTION_DATABASE_UPDATED\.equals\(intent\.getAction\(\)\)[\s\S]*controller\.refreshVisible\(\)' "database replacement must refresh the stationary car viewport"
+Assert-Contains $carSession 'new CarRadarBaseUpdateNotifier\(' "Car session must own RadarBase update feedback"
+Assert-Contains $carSession 'updateNotifier\.start\(\)' "Car session must start RadarBase feedback"
+Assert-Contains $carSession 'updateNotifier\.stop\(\)' "Car session must stop RadarBase feedback with its lifecycle"
+Assert-Contains $carSession 'CarToast\.makeText' "session-wide RadarBase feedback must use CarToast"
+Assert-Contains $carUpdateNotifier 'source\.addListener\(listener,\s*true\)' "session feedback must replay an update that already started"
+Assert-Contains $carUpdateNotifier 'source\.removeListener\(listener\)' "session feedback must release its process listener"
 Assert-Contains $carSession 'unregisterReceiver' "Car session must unregister its update receiver"
 Assert-Contains $carSession 'getCarService\(ScreenManager\.class\)\.push\(' "surface failures must open a setup MessageTemplate"
 Assert-Contains $carSession 'new CarSetupScreen\(getCarContext\(\),\s*true,\s*true,\s*message\)' "surface failure details must reach CarSetupScreen"
@@ -373,6 +387,9 @@ if ($carSession -match 'stopService') {
     throw "Car session destruction must not stop the shared TrackingService"
 }
 Assert-Contains $surfaceController 'implements SurfaceCallback' "Car controller must implement SurfaceCallback"
+Assert-Contains $surfaceController 'public synchronized void refreshVisible\(\)[\s\S]*surfaceResource\.refreshVisible\(\)' "car controller must delegate viewport refresh to its active resource"
+Assert-Contains $surfaceController 'void refreshVisible\(\);' "every surface resource must expose viewport refresh"
+Assert-Contains $surfaceController 'content\.refreshVisible\(\)' "Android surface resource must delegate viewport refresh to its content"
 Assert-Contains $surfaceController 'setSurfaceCallback\(this\)' "Car controller must register its surface callback"
 Assert-Contains $surfaceController 'setSurfaceCallback\(null\)' "Car controller destroy must clear its callback"
 Assert-Contains $surfaceController 'Surface::release' "production must release every host Surface"
@@ -429,6 +446,7 @@ if ($constructorBody -match 'new MapView|startMap\(') {
     throw "CarMapPresentation construction must not start native MapKit resources"
 }
 Assert-Contains $carPresentation 'new SharedCameraMapLayer' "Car presentation must use the shared camera layer"
+Assert-Contains $carPresentation 'public void refreshVisible\(\)[\s\S]*mapLayer\.refreshVisible\(\)' "car presentation must delegate viewport refresh to the shared layer"
 Assert-Contains $carPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
 if ($carPresentation -match 'alertAlgorithm') {
     throw "Algorithm details must not be rendered in the car speed HUD"
@@ -455,9 +473,9 @@ Assert-Contains $carMenu 'application\(carContext\)\.radarBaseUpdater\(\)' "Car 
 if ($carMenu -match 'new\s+RadarBaseUpdater\s*\(|new\s+StrelkaAlertTracker\s*\(') {
     throw "Car menu must not create a second updater or alert tracker"
 }
-Assert-Contains $carMenu 'CarToast\.makeText' "RadarBase update states must be shown through CarToast"
-Assert-Contains $carMenu 'addListener\(updateListener,\s*false\)' "Car menu must register the shared updater listener while visible"
-Assert-Contains $carMenu 'removeListener\(updateListener\)' "Car menu must remove the updater listener with its lifecycle"
+if ($carMenu -match 'CarToast|addListener|removeListener') {
+    throw "Car menu must not duplicate session-owned RadarBase feedback"
+}
 Assert-Contains $carMenu 'case EXIT:\s*exitAction\.exit\(\)' "Only the Exit row may invoke ExitAction"
 if ([regex]::Matches($carMenu, 'stopService\(').Count -ne 1) {
     throw "Only the explicit Android Auto exit adapter may stop TrackingService"

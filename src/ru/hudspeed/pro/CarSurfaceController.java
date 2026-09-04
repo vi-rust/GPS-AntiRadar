@@ -31,6 +31,7 @@ public final class CarSurfaceController implements SurfaceCallback {
 
     interface SurfaceResource {
         void onDrivingSnapshot(DrivingSnapshot snapshot);
+        void refreshVisible();
         void zoomBy(float delta);
         void recenter();
         void setPanMode(boolean enabled);
@@ -207,6 +208,12 @@ public final class CarSurfaceController implements SurfaceCallback {
         }
     }
 
+    public synchronized void refreshVisible() {
+        if (!destroyed && surfaceResource != null) {
+            surfaceResource.refreshVisible();
+        }
+    }
+
     public synchronized void zoomBy(float delta) {
         if (!destroyed && surfaceResource != null) {
             surfaceResource.zoomBy(delta);
@@ -340,6 +347,10 @@ public final class CarSurfaceController implements SurfaceCallback {
 
         @Override public void onDrivingSnapshot(DrivingSnapshot snapshot) {
             if (!released) content.onDrivingSnapshot(snapshot);
+        }
+
+        @Override public void refreshVisible() {
+            if (!released) content.refreshVisible();
         }
 
         @Override public void zoomBy(float delta) {

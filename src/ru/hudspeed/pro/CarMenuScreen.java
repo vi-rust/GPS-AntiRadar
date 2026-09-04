@@ -3,7 +3,6 @@ package ru.gpsantiradar.app;
 import android.content.Intent;
 
 import androidx.car.app.CarContext;
-import androidx.car.app.CarToast;
 import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.CarIcon;
@@ -12,14 +11,10 @@ import androidx.car.app.model.ListTemplate;
 import androidx.car.app.model.Row;
 import androidx.car.app.model.Template;
 import androidx.core.graphics.drawable.IconCompat;
-import androidx.lifecycle.DefaultLifecycleObserver;
-import androidx.lifecycle.LifecycleOwner;
 
 public final class CarMenuScreen extends Screen {
     interface UpdateController {
         void requestUpdate();
-        void addListener(RadarBaseUpdater.Listener listener, boolean replayLatest);
-        void removeListener(RadarBaseUpdater.Listener listener);
     }
 
     interface ExitAction {
@@ -29,14 +24,6 @@ public final class CarMenuScreen extends Screen {
     private final CarSurfaceController surfaceController;
     private final UpdateController updateController;
     private final ExitAction exitAction;
-    private boolean listeningForUpdates;
-
-    private final RadarBaseUpdater.Listener updateListener =
-            new RadarBaseUpdater.Listener() {
-                @Override public void onRadarBaseUpdate(RadarBaseUpdateState state) {
-                    showUpdateState(state);
-                }
-            };
 
     public CarMenuScreen(CarContext carContext,
             CarSurfaceController surfaceController) {
@@ -59,19 +46,6 @@ public final class CarMenuScreen extends Screen {
         this.surfaceController = surfaceController;
         this.updateController = updateController;
         this.exitAction = exitAction;
-        getLifecycle().addObserver(new DefaultLifecycleObserver() {
-            @Override public void onStart(LifecycleOwner owner) {
-                startListening();
-            }
-
-            @Override public void onStop(LifecycleOwner owner) {
-                stopListening();
-            }
-
-            @Override public void onDestroy(LifecycleOwner owner) {
-                stopListening();
-            }
-        });
     }
 
     @Override public Template onGetTemplate() {
@@ -125,26 +99,6 @@ public final class CarMenuScreen extends Screen {
             default:
                 throw new AssertionError(item);
         }
-    }
-
-    private void startListening() {
-        if (listeningForUpdates) return;
-        listeningForUpdates = true;
-        updateController.addListener(updateListener, false);
-    }
-
-    private void stopListening() {
-        if (!listeningForUpdates) return;
-        listeningForUpdates = false;
-        updateController.removeListener(updateListener);
-    }
-
-    private void showUpdateState(RadarBaseUpdateState state) {
-        if (state == null || state.status == RadarBaseUpdateState.Status.IDLE) return;
-        int duration = state.status == RadarBaseUpdateState.Status.STARTED
-                || state.status == RadarBaseUpdateState.Status.ALREADY_RUNNING
-                ? CarToast.LENGTH_SHORT : CarToast.LENGTH_LONG;
-        CarToast.makeText(getCarContext(), state.message, duration).show();
     }
 
     private CarIcon icon(int resourceId) {
@@ -207,15 +161,6 @@ public final class CarMenuScreen extends Screen {
 
         @Override public void requestUpdate() {
             updater.requestUpdate();
-        }
-
-        @Override public void addListener(
-                RadarBaseUpdater.Listener listener, boolean replayLatest) {
-            updater.addListener(listener, replayLatest);
-        }
-
-        @Override public void removeListener(RadarBaseUpdater.Listener listener) {
-            updater.removeListener(listener);
         }
     }
 }

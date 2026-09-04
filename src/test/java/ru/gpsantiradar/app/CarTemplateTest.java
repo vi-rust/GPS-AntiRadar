@@ -188,34 +188,44 @@ public final class CarTemplateTest {
         assertTrue(screenManager.getScreensPushed().get(0) instanceof CarAboutScreen);
     }
 
-    @Test public void carMenuUsesSharedUpdaterToShowEveryStateAndExplicitExit() {
+    @Test public void carMenuRequestsSharedUpdateAndExplicitExit() {
         CarContext carContext = carContext();
         FakeUpdateController updates = new FakeUpdateController();
         int[] exits = { 0 };
         CarMenuScreen screen = new CarMenuScreen(
                 carContext, null, updates, () -> exits[0]++);
-        ScreenController lifecycle = new ScreenController(screen);
-        lifecycle.moveToState(Lifecycle.State.STARTED);
         List<Item> items = ((ListTemplate) screen.onGetTemplate())
                 .getSingleList().getItems();
 
         click((Row) items.get(0));
         assertEquals(1, updates.requestCount);
-        updates.emit(RadarBaseUpdateState.Status.STARTED, "Начато");
-        updates.emit(RadarBaseUpdateState.Status.UNCHANGED, "Без изменений");
-        updates.emit(RadarBaseUpdateState.Status.SUCCESS, "Готово");
-        updates.emit(RadarBaseUpdateState.Status.ERROR, "Ошибка");
-        updates.emit(RadarBaseUpdateState.Status.ALREADY_RUNNING, "Уже выполняется");
-        TestAppManager appManager =
-                (TestAppManager) carContext.getCarService(AppManager.class);
-        assertEquals(Arrays.asList(
-                "Начато", "Без изменений", "Готово", "Ошибка", "Уже выполняется"),
-                appManager.getToastsShown());
 
         click((Row) items.get(6));
         assertEquals(1, exits[0]);
-        lifecycle.moveToState(Lifecycle.State.DESTROYED);
-        assertEquals(1, updates.removeCount);
+    }
+
+    @Test public void refreshVisibleReachesOnlyActiveSurfaceResource() {
+        CarContext carContext = carContext();
+        List<RefreshRecordingSurfaceResource> resources = new ArrayList<>();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> {
+                    RefreshRecordingSurfaceResource resource =
+                            new RefreshRecordingSurfaceResource();
+                    resources.add(resource);
+                    return resource;
+                });
+
+        controller.refreshVisible();
+        controller.onSurfaceAvailable(new SurfaceContainer(null, 800, 480, 160));
+        controller.refreshVisible();
+        controller.onSurfaceAvailable(new SurfaceContainer(null, 1280, 720, 240));
+        controller.refreshVisible();
+        controller.destroy();
+        controller.refreshVisible();
+
+        assertEquals(2, resources.size());
+        assertEquals(1, resources.get(0).refreshCount);
+        assertEquals(1, resources.get(1).refreshCount);
     }
 
     @Test public void mapKeyScreenRejectsBlankAndPersistsTrimmedKey() {
@@ -720,30 +730,10 @@ public final class CarTemplateTest {
 
     private static final class FakeUpdateController
             implements CarMenuScreen.UpdateController {
-        RadarBaseUpdater.Listener listener;
         int requestCount;
-        int removeCount;
-        long sequence;
 
         @Override public void requestUpdate() {
             requestCount++;
-        }
-
-        @Override public void addListener(
-                RadarBaseUpdater.Listener listener, boolean replayLatest) {
-            this.listener = listener;
-        }
-
-        @Override public void removeListener(RadarBaseUpdater.Listener listener) {
-            if (this.listener == listener) {
-                this.listener = null;
-                removeCount++;
-            }
-        }
-
-        void emit(RadarBaseUpdateState.Status status, String message) {
-            listener.onRadarBaseUpdate(new RadarBaseUpdateState(
-                    ++sequence, status, 0, false, message));
         }
     }
 
@@ -762,6 +752,7 @@ public final class CarTemplateTest {
     private static class NoOpSurfaceResource
             implements CarSurfaceController.SurfaceResource {
         @Override public void onDrivingSnapshot(DrivingSnapshot snapshot) {}
+        @Override public void refreshVisible() {}
         @Override public void zoomBy(float delta) {}
         @Override public void recenter() {}
         @Override public void setPanMode(boolean enabled) {}
@@ -773,6 +764,15 @@ public final class CarTemplateTest {
         @Override public void onScale(float focusX, float focusY, float scaleFactor) {}
         @Override public void onClick(float x, float y) {}
         @Override public void release() {}
+    }
+
+    private static final class RefreshRecordingSurfaceResource
+            extends NoOpSurfaceResource {
+        int refreshCount;
+
+        @Override public void refreshVisible() {
+            refreshCount++;
+        }
     }
 
     private static final class RecordingSurfaceResource extends NoOpSurfaceResource {

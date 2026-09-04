@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.os.Build;
 
+import androidx.car.app.CarToast;
 import androidx.car.app.Screen;
 import androidx.car.app.ScreenManager;
 import androidx.car.app.Session;
@@ -19,6 +20,7 @@ import androidx.lifecycle.LifecycleOwner;
 
 public final class GpsCarSession extends Session {
     private CarSurfaceController surfaceController;
+    private CarRadarBaseUpdateNotifier updateNotifier;
     private BroadcastReceiver updateReceiver;
     private boolean receiverRegistered;
     private boolean surfaceFailureShown;
@@ -26,6 +28,7 @@ public final class GpsCarSession extends Session {
     public GpsCarSession() {
         getLifecycle().addObserver(new DefaultLifecycleObserver() {
             @Override public void onDestroy(LifecycleOwner owner) {
+                stopUpdateFeedback();
                 destroyCarResources();
             }
         });
@@ -33,6 +36,9 @@ public final class GpsCarSession extends Session {
 
     @Override public Screen onCreateScreen(Intent intent) {
         Context context = getCarContext();
+        GpsAntiRadarApplication application =
+                (GpsAntiRadarApplication) context.getApplicationContext();
+        startUpdateFeedback(application.radarBaseUpdater());
         surfaceFailureShown = false;
         boolean locationGranted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -44,11 +50,9 @@ public final class GpsCarSession extends Session {
         }
 
         destroyCarResources();
-        GpsAntiRadarApplication application =
-                (GpsAntiRadarApplication) context.getApplicationContext();
         surfaceController = new CarSurfaceController(
                 getCarContext(), application, this::showSurfaceFailure);
-        registerTrackingReceiver();
+        registerUpdateReceiver();
         context.startForegroundService(new Intent(context, TrackingService.class)
                 .setAction(TrackingService.ACTION_START));
         return new CarMapScreen(getCarContext(), surfaceController);
@@ -68,17 +72,22 @@ public final class GpsCarSession extends Session {
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
-    private void registerTrackingReceiver() {
+    private void registerUpdateReceiver() {
         if (receiverRegistered) return;
         updateReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
                 CarSurfaceController controller = surfaceController;
-                if (controller != null) {
+                if (controller == null || intent == null) return;
+                if (RadarBaseUpdater.ACTION_DATABASE_UPDATED.equals(intent.getAction())) {
+                    controller.refreshVisible();
+                } else if (TrackingService.ACTION_UPDATE.equals(intent.getAction())) {
                     controller.onDrivingSnapshot(DrivingSnapshotIntent.from(intent));
                 }
             }
         };
-        IntentFilter filter = new IntentFilter(TrackingService.ACTION_UPDATE);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(TrackingService.ACTION_UPDATE);
+        filter.addAction(RadarBaseUpdater.ACTION_DATABASE_UPDATED);
         if (Build.VERSION.SDK_INT >= 33) {
             getCarContext().registerReceiver(
                     updateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -86,6 +95,27 @@ public final class GpsCarSession extends Session {
             getCarContext().registerReceiver(updateReceiver, filter);
         }
         receiverRegistered = true;
+    }
+
+    private void startUpdateFeedback(RadarBaseUpdater updater) {
+        if (updateNotifier == null) {
+            updateNotifier = new CarRadarBaseUpdateNotifier(
+                    updater, this::showUpdateState);
+        }
+        updateNotifier.start();
+    }
+
+    private void stopUpdateFeedback() {
+        if (updateNotifier == null) return;
+        updateNotifier.stop();
+        updateNotifier = null;
+    }
+
+    private void showUpdateState(RadarBaseUpdateState state) {
+        int duration = state.status == RadarBaseUpdateState.Status.STARTED
+                || state.status == RadarBaseUpdateState.Status.ALREADY_RUNNING
+                ? CarToast.LENGTH_SHORT : CarToast.LENGTH_LONG;
+        CarToast.makeText(getCarContext(), state.message, duration).show();
     }
 
     private void destroyCarResources() {

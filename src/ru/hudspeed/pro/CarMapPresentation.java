@@ -124,6 +124,10 @@ public final class CarMapPresentation {
         }
     }
 
+    public void refreshVisible() {
+        if (!destroyed && mapLayer != null) mapLayer.refreshVisible();
+    }
+
     public void zoomBy(float delta) {
         if (gestureController != null) gestureController.zoomBy(delta);
     }
