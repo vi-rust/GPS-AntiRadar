@@ -300,7 +300,9 @@ $carSourceRoot = Join-Path $Project "src\ru\hudspeed\pro"
 $requiredCarSources = @(
         "GpsCarAppService.java", "GpsCarSession.java", "CarSetupScreen.java",
         "CarSurfaceSpec.java", "CarSurfaceController.java", "CarMapPresentation.java",
-        "CarMapScreen.java", "CarMapGestureController.java")
+        "CarMapScreen.java", "CarMapGestureController.java", "CarMenuItem.java",
+        "CarMenuScreen.java", "CarValueScreen.java", "CarMapKeyScreen.java",
+        "CarAboutScreen.java")
 foreach ($sourceName in $requiredCarSources) {
     $sourcePath = Join-Path $carSourceRoot $sourceName
     if (-not (Test-Path $sourcePath)) {
@@ -318,6 +320,16 @@ $carSetupScreen = Get-Content -Raw -Encoding UTF8 (
 $carMapScreen = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "CarMapScreen.java")
 $carGestures = Get-Content -Raw -Encoding UTF8 (
         Join-Path $carSourceRoot "CarMapGestureController.java")
+$carMenuItem = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarMenuItem.java")
+$carMenu = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarMenuScreen.java")
+$carValue = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarValueScreen.java")
+$carMapKey = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarMapKeyScreen.java")
+$carAbout = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarAboutScreen.java")
 
 Assert-Contains $carService 'addAllowedHosts\(androidx\.car\.app\.R\.array\.hosts_allowlist_sample\)' "Car service must load the official projected-host allowlist"
 Assert-Contains $carService 'new GpsCarSession\(\)' "Car service must create GpsCarSession"
@@ -410,13 +422,49 @@ Assert-Contains $carPresentation 'isDarkMode' "Car HUD must follow car dark mode
 Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
 Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"
 Assert-Contains $carMapScreen 'setPanModeListener' "Car map must forward pan mode changes"
+Assert-Contains $carMapScreen 'getCarService\(ScreenManager\.class\)[\s\S]*push\(new CarMenuScreen' "Car map menu action must push the real menu through ScreenManager"
+Assert-Contains $carMapScreen 'R\.drawable\.ic_car_menu' "Car map menu action must use its monochrome icon"
+Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*ALERT_DISTANCE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
+Assert-Contains $carMenu 'ListTemplate\.Builder\(\)[\s\S]*setHeaderAction\(Action\.BACK\)[\s\S]*setSingleList' "Car menu must use one back-enabled ListTemplate"
+Assert-Contains $carMenu 'application\(carContext\)\.radarBaseUpdater\(\)' "Car menu must reuse the application-owned RadarBaseUpdater"
+if ($carMenu -match 'new\s+RadarBaseUpdater\s*\(|new\s+StrelkaAlertTracker\s*\(') {
+    throw "Car menu must not create a second updater or alert tracker"
+}
+Assert-Contains $carMenu 'CarToast\.makeText' "RadarBase update states must be shown through CarToast"
+Assert-Contains $carMenu 'addListener\(updateListener,\s*false\)' "Car menu must register the shared updater listener while visible"
+Assert-Contains $carMenu 'removeListener\(updateListener\)' "Car menu must remove the updater listener with its lifecycle"
+Assert-Contains $carMenu 'case EXIT:\s*exitAction\.exit\(\)' "Only the Exit row may invoke ExitAction"
+if ([regex]::Matches($carMenu, 'stopService\(').Count -ne 1) {
+    throw "Only the explicit Android Auto exit adapter may stop TrackingService"
+}
+Assert-Contains $carMenu 'stopService\([\s\S]*TrackingService\.class' "Explicit Android Auto exit must stop TrackingService"
+Assert-Contains $carMenu 'popToRoot\(\)' "Explicit Android Auto exit must pop to the root screen"
+Assert-Contains $carMenu 'finishCarApp\(\)' "Explicit Android Auto exit must finish the car app"
+
+foreach ($settingsMethod in @(
+        "adjustAlertDistance", "adjustOverspeedThreshold",
+        "adjustHudTransparency")) {
+    Assert-Contains $carValue ([regex]::Escape("AppSettings.$settingsMethod(")) "CarValueScreen must reuse AppSettings.$settingsMethod"
+}
+Assert-Contains $carValue 'putInt\(setting\.preferenceKey\(\),\s*adjusted\)\.commit\(\)' "Car numeric settings must be persisted synchronously"
+Assert-Contains $carValue 'surfaceController::refreshHudTransparency' "HUD transparency changes must refresh the shared car presentation"
+Assert-Contains $carMapKey 'SearchTemplate\.Builder' "MapKit key input must use SearchTemplate"
+Assert-Contains $carMapKey 'searchText == null \? "" : searchText\.trim\(\)' "MapKit key input must trim and reject blank input"
+Assert-Contains $carMapKey 'putString\(AppSettings\.MAPKIT_KEY,\s*key\)\.commit\(\)' "MapKit key must be persisted synchronously"
+Assert-Contains $carMapKey 'CarToast\.makeText' "MapKit key validation and restart notice must use CarToast"
+Assert-Contains $carAbout 'LongMessageTemplate\.Builder' "Android Auto About must use LongMessageTemplate"
+Assert-Contains $carAbout 'new CameraDatabase\(carContext\)' "Android Auto About must read the shared camera database"
+Assert-Contains $carAbout 'new Thread\(command,\s*"car-about-count"\)' "Android Auto About database count must run off the main thread"
+Assert-Contains $carAbout 'new Handler\(Looper\.getMainLooper\(\)\)' "Android Auto About results must return to the main thread"
+Assert-Contains $carAbout 'if \(destroyed\) return;\s*databaseCount = result;\s*invalidate\(\)' "Android Auto About async results must be lifecycle-safe before invalidation"
+Assert-Contains $carAbout 'ReleaseHistory\.entries\(\)' "Android Auto About must render only the shared known release history"
 Assert-Contains $carGestures 'Math\.log\(scaleFactor\).*Math\.log\(2' "Car scale must use logarithmic zoom"
 Assert-Contains $carGestures 'screenToWorld' "Car pan/click gestures must convert screen coordinates"
 Assert-Contains $carGestures 'Animation\.Type\.SMOOTH' "Car fling must use a short smooth map animation"
 
 foreach ($iconName in @(
         "ic_car_zoom_in.xml", "ic_car_zoom_out.xml",
-        "ic_car_pan.xml", "ic_car_location.xml")) {
+        "ic_car_pan.xml", "ic_car_location.xml", "ic_car_menu.xml")) {
     $iconPath = Join-Path $Project "res\drawable\$iconName"
     if (-not (Test-Path $iconPath)) { throw "Android Auto icon is missing: $iconName" }
     $icon = [xml](Get-Content -Raw -Encoding UTF8 $iconPath)

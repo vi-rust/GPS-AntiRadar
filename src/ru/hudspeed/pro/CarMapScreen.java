@@ -2,6 +2,7 @@ package ru.gpsantiradar.app;
 
 import androidx.car.app.CarContext;
 import androidx.car.app.Screen;
+import androidx.car.app.ScreenManager;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.ActionStrip;
 import androidx.car.app.model.CarIcon;
@@ -14,9 +15,9 @@ public final class CarMapScreen extends Screen {
     private final Runnable menuAction;
 
     public CarMapScreen(CarContext carContext, CarSurfaceController surfaceController) {
-        this(carContext, surfaceController, new Runnable() {
-            @Override public void run() {}
-        });
+        this(carContext, surfaceController, () -> carContext
+                .getCarService(ScreenManager.class)
+                .push(new CarMenuScreen(carContext, surfaceController)));
     }
 
     CarMapScreen(CarContext carContext, CarSurfaceController surfaceController,
@@ -29,7 +30,8 @@ public final class CarMapScreen extends Screen {
     @Override public Template onGetTemplate() {
         ActionStrip applicationActions = new ActionStrip.Builder()
                 .addAction(new Action.Builder()
-                        .setTitle("Меню")
+                        .setIcon(new CarIcon.Builder(IconCompat.createWithResource(
+                                getCarContext(), R.drawable.ic_car_menu)).build())
                         .setOnClickListener(menuAction::run)
                         .build())
                 .build();

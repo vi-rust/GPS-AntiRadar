@@ -15,14 +15,25 @@ import android.widget.FrameLayout;
 
 import androidx.car.app.CarContext;
 import androidx.car.app.AppManager;
+import androidx.car.app.OnDoneCallback;
+import androidx.car.app.Screen;
 import androidx.car.app.SurfaceContainer;
 import androidx.car.app.model.Action;
+import androidx.car.app.model.Item;
+import androidx.car.app.model.ListTemplate;
+import androidx.car.app.model.LongMessageTemplate;
 import androidx.car.app.model.MessageTemplate;
+import androidx.car.app.model.PaneTemplate;
+import androidx.car.app.model.Row;
+import androidx.car.app.model.SearchTemplate;
 import androidx.car.app.navigation.model.NavigationTemplate;
+import androidx.car.app.testing.ScreenController;
 import androidx.car.app.testing.TestAppManager;
 import androidx.car.app.testing.TestCarContext;
+import androidx.car.app.testing.TestScreenManager;
 import androidx.car.app.validation.HostValidator;
 import androidx.test.core.app.ApplicationProvider;
+import androidx.lifecycle.Lifecycle;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -32,6 +43,7 @@ import org.robolectric.Robolectric;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 @RunWith(RobolectricTestRunner.class)
 public final class CarTemplateTest {
@@ -79,6 +91,213 @@ public final class CarTemplateTest {
                 (TestAppManager) carContext.getCarService(AppManager.class);
         assertSame(controller, appManager.getSurfaceCallback());
         controller.destroy();
+    }
+
+    @Test public void mapMenuActionPushesCarMenuScreen() {
+        CarContext carContext = carContext();
+        CarSurfaceController controller = new CarSurfaceController(
+                carContext, null, (spec, surface) -> new NoOpSurfaceResource());
+        NavigationTemplate template =
+                (NavigationTemplate) new CarMapScreen(carContext, controller)
+                        .onGetTemplate();
+
+        assertTrue(template.getActionStrip().getActions().get(0).getIcon() != null);
+        click(template.getActionStrip().getActions().get(0));
+
+        TestScreenManager screenManager = (TestScreenManager)
+                carContext.getCarService(androidx.car.app.ScreenManager.class);
+        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarMenuScreen);
+        controller.destroy();
+    }
+
+    @Test public void carValueSettingsUseSharedRangesAndRussianFormatting() {
+        assertSetting(CarValueScreen.Setting.ALERT_DISTANCE,
+                AppSettings.ALERT_DISTANCE, 300, 2000, 100, "800 м");
+        assertSetting(CarValueScreen.Setting.OVERSPEED_THRESHOLD,
+                AppSettings.OVERSPEED_THRESHOLD, 0, 20, 1, "10 км/ч");
+        assertSetting(CarValueScreen.Setting.HUD_TRANSPARENCY,
+                AppSettings.HUD_TRANSPARENCY, 0, 80, 5, "10%");
+    }
+
+    @Test public void carValueActionsPersistClampedValuesAndRefreshHud() {
+        CarContext carContext = carContext();
+        Context context = carContext;
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        int[] hudRefreshes = { 0 };
+        CarValueScreen screen = new CarValueScreen(carContext,
+                CarValueScreen.Setting.HUD_TRANSPARENCY, () -> hudRefreshes[0]++);
+        PaneTemplate initial = (PaneTemplate) screen.onGetTemplate();
+
+        assertEquals("Прозрачность HUD", initial.getTitle().toString());
+        assertEquals("10%", initial.getPane().getRows().get(0).getTitle().toString());
+        assertEquals(2, initial.getPane().getActions().size());
+        click(initial.getPane().getActions().get(0));
+        assertEquals(5, context.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE).getInt(
+                AppSettings.HUD_TRANSPARENCY, -1));
+        assertEquals(1, hudRefreshes[0]);
+
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().putInt(AppSettings.HUD_TRANSPARENCY, 80).commit();
+        click(((PaneTemplate) screen.onGetTemplate()).getPane().getActions().get(1));
+        assertEquals(80, context.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE).getInt(
+                AppSettings.HUD_TRANSPARENCY, -1));
+        assertEquals(2, hudRefreshes[0]);
+    }
+
+    @Test public void carMenuShowsSevenActionsAndRoutesEverySettingsScreen() {
+        CarContext carContext = carContext();
+        FakeUpdateController updates = new FakeUpdateController();
+        CarMenuScreen screen = new CarMenuScreen(
+                carContext, null, updates, () -> {});
+        ListTemplate template = (ListTemplate) screen.onGetTemplate();
+        List<Item> items = template.getSingleList().getItems();
+
+        assertEquals(Action.TYPE_BACK, template.getHeaderAction().getType());
+        assertEquals(Arrays.asList(
+                "Обновить базу",
+                "Расстояние оповещения",
+                "Предел превышения для beep",
+                "Прозрачность HUD",
+                "Ключ MapKit",
+                "О программе",
+                "Выход"), rowTitles(items));
+
+        TestScreenManager screenManager = (TestScreenManager)
+                carContext.getCarService(androidx.car.app.ScreenManager.class);
+        String[] expectedTitles = {
+                "Расстояние оповещения",
+                "Предел превышения для beep",
+                "Прозрачность HUD"
+        };
+        for (int index = 1; index <= 3; index++) {
+            screenManager.reset();
+            click((Row) items.get(index));
+            Screen pushed = screenManager.getScreensPushed().get(0);
+            assertTrue(pushed instanceof CarValueScreen);
+            assertEquals(expectedTitles[index - 1],
+                    ((PaneTemplate) pushed.onGetTemplate()).getTitle().toString());
+        }
+        screenManager.reset();
+        click((Row) items.get(4));
+        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarMapKeyScreen);
+        screenManager.reset();
+        click((Row) items.get(5));
+        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarAboutScreen);
+    }
+
+    @Test public void carMenuUsesSharedUpdaterToShowEveryStateAndExplicitExit() {
+        CarContext carContext = carContext();
+        FakeUpdateController updates = new FakeUpdateController();
+        int[] exits = { 0 };
+        CarMenuScreen screen = new CarMenuScreen(
+                carContext, null, updates, () -> exits[0]++);
+        ScreenController lifecycle = new ScreenController(screen);
+        lifecycle.moveToState(Lifecycle.State.STARTED);
+        List<Item> items = ((ListTemplate) screen.onGetTemplate())
+                .getSingleList().getItems();
+
+        click((Row) items.get(0));
+        assertEquals(1, updates.requestCount);
+        updates.emit(RadarBaseUpdateState.Status.STARTED, "Начато");
+        updates.emit(RadarBaseUpdateState.Status.UNCHANGED, "Без изменений");
+        updates.emit(RadarBaseUpdateState.Status.SUCCESS, "Готово");
+        updates.emit(RadarBaseUpdateState.Status.ERROR, "Ошибка");
+        updates.emit(RadarBaseUpdateState.Status.ALREADY_RUNNING, "Уже выполняется");
+        TestAppManager appManager =
+                (TestAppManager) carContext.getCarService(AppManager.class);
+        assertEquals(Arrays.asList(
+                "Начато", "Без изменений", "Готово", "Ошибка", "Уже выполняется"),
+                appManager.getToastsShown());
+
+        click((Row) items.get(6));
+        assertEquals(1, exits[0]);
+        lifecycle.moveToState(Lifecycle.State.DESTROYED);
+        assertEquals(1, updates.removeCount);
+    }
+
+    @Test public void mapKeyScreenRejectsBlankAndPersistsTrimmedKey() {
+        CarContext carContext = carContext();
+        Context context = carContext;
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        SearchTemplate template =
+                (SearchTemplate) new CarMapKeyScreen(carContext).onGetTemplate();
+
+        assertEquals(Action.TYPE_BACK, template.getHeaderAction().getType());
+        assertEquals("Ключ Yandex MapKit", template.getSearchHint());
+        assertTrue(template.isShowKeyboardByDefault());
+        assertTrue(((Row) template.getItemList().getItems().get(0))
+                .getTexts().get(0).toString().contains("телефоне"));
+
+        template.getSearchCallbackDelegate().sendSearchSubmitted(
+                "   ", new OnDoneCallback() {});
+        assertFalse(context.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .contains(AppSettings.MAPKIT_KEY));
+
+        template.getSearchCallbackDelegate().sendSearchSubmitted(
+                "  test-map-key  ", new OnDoneCallback() {});
+        assertEquals("test-map-key", context.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .getString(AppSettings.MAPKIT_KEY, ""));
+        TestAppManager appManager =
+                (TestAppManager) carContext.getCarService(AppManager.class);
+        assertTrue(appManager.getToastsShown().get(0).toString().contains("пустым"));
+        assertTrue(appManager.getToastsShown().get(1).toString().contains("перезапустите"));
+    }
+
+    @Test public void aboutScreenLoadsCountOnBackgroundAndShowsOnlyKnownHistory() {
+        CarContext carContext = carContext();
+        carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().putLong(AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD, 0L)
+                .commit();
+        QueuedExecutor background = new QueuedExecutor();
+        QueuedExecutor main = new QueuedExecutor();
+        CarAboutScreen screen = new CarAboutScreen(
+                carContext, () -> 12345, background, main);
+        ScreenController lifecycle = new ScreenController(screen);
+
+        String loading = ((LongMessageTemplate) screen.onGetTemplate())
+                .getMessage().toString();
+        assertTrue(loading.contains("Объектов в базе: загрузка…"));
+        lifecycle.moveToState(Lifecycle.State.STARTED);
+        assertEquals(1, background.tasks.size());
+        background.runNext();
+        assertTrue(((LongMessageTemplate) screen.onGetTemplate())
+                .getMessage().toString().contains("загрузка…"));
+        main.runNext();
+
+        LongMessageTemplate loaded = (LongMessageTemplate) screen.onGetTemplate();
+        String message = loaded.getMessage().toString();
+        assertEquals(Action.TYPE_BACK, loaded.getHeaderAction().getType());
+        assertTrue(message.contains("Версия " + BuildConfig.VERSION_NAME));
+        assertTrue(message.contains(java.text.NumberFormat
+                .getIntegerInstance().format(12345)));
+        assertTrue(message.contains("Последняя успешная загрузка: не выполнялась"));
+        for (ReleaseHistory.Entry entry : ReleaseHistory.entries()) {
+            assertTrue(message.contains("Версия " + entry.version));
+            assertTrue(message.contains(entry.changes));
+        }
+        lifecycle.moveToState(Lifecycle.State.DESTROYED);
+    }
+
+    @Test public void aboutScreenDropsAsyncCountAfterDestroy() {
+        CarContext carContext = carContext();
+        QueuedExecutor background = new QueuedExecutor();
+        QueuedExecutor main = new QueuedExecutor();
+        CarAboutScreen screen = new CarAboutScreen(
+                carContext, () -> 77, background, main);
+        ScreenController lifecycle = new ScreenController(screen);
+        lifecycle.moveToState(Lifecycle.State.STARTED);
+        background.runNext();
+        lifecycle.moveToState(Lifecycle.State.DESTROYED);
+        main.runNext();
+
+        assertTrue(((LongMessageTemplate) screen.onGetTemplate())
+                .getMessage().toString().contains("загрузка…"));
     }
 
     @Test public void replacingSurfaceReleasesOldResourceBeforeCreatingNewOne() {
@@ -472,6 +691,72 @@ public final class CarTemplateTest {
     private static CarContext carContext() {
         Context context = ApplicationProvider.getApplicationContext();
         return TestCarContext.createCarContext(context);
+    }
+
+    private static void assertSetting(CarValueScreen.Setting setting,
+            String key, int min, int max, int step, String formattedDefault) {
+        assertEquals(key, setting.preferenceKey());
+        assertEquals(min, setting.minValue());
+        assertEquals(max, setting.maxValue());
+        assertEquals(step, setting.step());
+        assertEquals(formattedDefault, setting.format(setting.defaultValue()));
+    }
+
+    private static void click(Action action) {
+        action.getOnClickDelegate().sendClick(new OnDoneCallback() {});
+    }
+
+    private static void click(Row row) {
+        row.getOnClickDelegate().sendClick(new OnDoneCallback() {});
+    }
+
+    private static List<String> rowTitles(List<Item> items) {
+        List<String> titles = new ArrayList<>();
+        for (Item item : items) {
+            titles.add(((Row) item).getTitle().toString());
+        }
+        return titles;
+    }
+
+    private static final class FakeUpdateController
+            implements CarMenuScreen.UpdateController {
+        RadarBaseUpdater.Listener listener;
+        int requestCount;
+        int removeCount;
+        long sequence;
+
+        @Override public void requestUpdate() {
+            requestCount++;
+        }
+
+        @Override public void addListener(
+                RadarBaseUpdater.Listener listener, boolean replayLatest) {
+            this.listener = listener;
+        }
+
+        @Override public void removeListener(RadarBaseUpdater.Listener listener) {
+            if (this.listener == listener) {
+                this.listener = null;
+                removeCount++;
+            }
+        }
+
+        void emit(RadarBaseUpdateState.Status status, String message) {
+            listener.onRadarBaseUpdate(new RadarBaseUpdateState(
+                    ++sequence, status, 0, false, message));
+        }
+    }
+
+    private static final class QueuedExecutor implements Executor {
+        final List<Runnable> tasks = new ArrayList<>();
+
+        @Override public void execute(Runnable command) {
+            tasks.add(command);
+        }
+
+        void runNext() {
+            tasks.remove(0).run();
+        }
     }
 
     private static class NoOpSurfaceResource

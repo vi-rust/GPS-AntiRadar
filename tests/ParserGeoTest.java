@@ -158,6 +158,7 @@ public final class ParserGeoTest {
 
         verifyMapMarkerPresentationEquality();
         verifyDrivingSnapshotAndHud();
+        verifyCarMenuItems();
         check(AppSettings.adjustAlertDistance(300, -1) == 300
                         && AppSettings.adjustAlertDistance(300, 1) == 400
                         && AppSettings.adjustAlertDistance(2000, 1) == 2000,
@@ -249,6 +250,19 @@ public final class ParserGeoTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private static void verifyCarMenuItems() {
+        check(java.util.Arrays.equals(CarMenuItem.values(), new CarMenuItem[] {
+                        CarMenuItem.UPDATE_DATABASE,
+                        CarMenuItem.ALERT_DISTANCE,
+                        CarMenuItem.OVERSPEED_THRESHOLD,
+                        CarMenuItem.HUD_TRANSPARENCY,
+                        CarMenuItem.MAPKIT_KEY,
+                        CarMenuItem.ABOUT,
+                        CarMenuItem.EXIT
+                }),
+                "car menu exposes all seven actions in display order");
     }
 
     private static void verifyStrelkaAlertLifecycle() {
