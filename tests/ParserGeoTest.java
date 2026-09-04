@@ -145,6 +145,7 @@ public final class ParserGeoTest {
         verifyKnownReleaseHistory();
         verifyProcessLaunchGuard();
         verifyRadarBaseUpdateSingleFlight();
+        verifyRadarBaseUpdateStates();
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
         verifyMapMarkerEntityDiff();
@@ -432,6 +433,51 @@ public final class ParserGeoTest {
         guard.finish();
         check(guard.tryStart(), "a later database update starts after completion");
         guard.finish();
+    }
+
+    private static void verifyRadarBaseUpdateStates() {
+        RadarBaseUpdateState started = new RadarBaseUpdateState(1,
+                RadarBaseUpdateState.Status.STARTED, 91, true, "");
+        check(started.sequence == 1
+                        && started.status == RadarBaseUpdateState.Status.STARTED
+                        && !started.isTerminal(),
+                "RadarBase update starts with a non-terminal STARTED state");
+        check(started.importedCount == 0 && !started.coordinatesCorrected,
+                "STARTED does not expose import results");
+
+        RadarBaseUpdateState unchanged = new RadarBaseUpdateState(2,
+                RadarBaseUpdateState.Status.UNCHANGED, 91, true, "");
+        check(unchanged.sequence > started.sequence
+                        && unchanged.status == RadarBaseUpdateState.Status.UNCHANGED
+                        && unchanged.isTerminal(),
+                "RadarBase update transitions from STARTED to UNCHANGED");
+        check(unchanged.importedCount == 0 && !unchanged.coordinatesCorrected,
+                "UNCHANGED does not expose import results");
+
+        RadarBaseUpdateState success = new RadarBaseUpdateState(3,
+                RadarBaseUpdateState.Status.SUCCESS, 91, true, "");
+        check(success.sequence > started.sequence
+                        && success.status == RadarBaseUpdateState.Status.SUCCESS
+                        && success.isTerminal(),
+                "RadarBase update transitions from STARTED to SUCCESS");
+        check(success.importedCount == 91 && success.coordinatesCorrected,
+                "SUCCESS exposes imported object count and coordinate correction");
+
+        RadarBaseUpdateState error = new RadarBaseUpdateState(4,
+                RadarBaseUpdateState.Status.ERROR, 91, true, "network error");
+        check(error.sequence > started.sequence
+                        && error.status == RadarBaseUpdateState.Status.ERROR
+                        && error.isTerminal()
+                        && error.message.equals("network error"),
+                "RadarBase update transitions from STARTED to ERROR");
+        check(error.importedCount == 0 && !error.coordinatesCorrected,
+                "ERROR does not expose import results");
+
+        RadarBaseUpdateState alreadyRunning = new RadarBaseUpdateState(5,
+                RadarBaseUpdateState.Status.ALREADY_RUNNING, 91, true, "");
+        check(alreadyRunning.isTerminal() && alreadyRunning.importedCount == 0
+                        && !alreadyRunning.coordinatesCorrected,
+                "ALREADY_RUNNING is terminal and does not expose import results");
     }
 
     private static void verifyCameraMarkerDiff() {

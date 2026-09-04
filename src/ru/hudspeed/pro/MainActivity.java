@@ -59,11 +59,7 @@ import com.yandex.mapkit.map.VisibleRegion;
 import com.yandex.mapkit.mapview.MapView;
 import com.yandex.runtime.image.ImageProvider;
 
-import java.io.InputStream;
-import java.io.IOException;
 import java.lang.ref.WeakReference;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.DateFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -72,7 +68,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.GZIPInputStream;
 
 public final class MainActivity extends Activity {
     private static final int OBSERVATION_MARKER = -1;
@@ -84,17 +79,8 @@ public final class MainActivity extends Activity {
     private static final String MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4";
     private static final String MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5";
     private static final String MAPKIT_KEY_REENTRY = "mapkit_key_reentry_v6";
-    private static final String RADARBASE_URL =
-            "https://radarbase.info/export/cache/RU/main_extended.json";
-    private static final String RADARBASE_ETAG = "radarbase_etag";
-    private static final String RADARBASE_MODIFIED = "radarbase_modified";
     private static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
             AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD;
-    private static final String ACTION_RADARBASE_UPDATED =
-            "ru.gpsantiradar.app.RADARBASE_UPDATED";
-    private static final String RADARBASE_COORDINATE_FIX = "radarbase_coordinate_fix_v1";
-    private static final String RADARBASE_IMPORT_FORMAT = "radarbase_import_format";
-    private static final int CURRENT_RADARBASE_IMPORT_FORMAT = 2;
     private static final int MAX_VISIBLE_MARKERS = 5000;
     private static final float COVERAGE_MIN_ZOOM = 13f;
     private static final long HINT_ANIMATION_MS = 220L;
@@ -180,23 +166,24 @@ public final class MainActivity extends Activity {
         }
     };
 
+    private final RadarBaseUpdater.Listener radarBaseUpdateListener =
+            new RadarBaseUpdater.Listener() {
+                @Override public void onRadarBaseUpdate(RadarBaseUpdateState state) {
+                    showRadarBaseUpdateState(state);
+                }
+            };
+
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_FULLSCREEN);
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
-        prepareRadarBaseMigration();
         mapInitialized = initializeMapKitSafely();
         buildUi();
         refreshDatabaseCount();
         getWindow().getDecorView().post(new Runnable() {
             @Override public void run() { startRequested(); }
         });
-        if (((GpsAntiRadarApplication) getApplication()).claimRadarBaseStartupUpdate()) {
-            getWindow().getDecorView().post(new Runnable() {
-                @Override public void run() { updateRadarBase(); }
-            });
-        }
         if (mapInitialized) {
             loadCameraMarkers(true);
             getWindow().getDecorView().postDelayed(new Runnable() {
@@ -263,16 +250,6 @@ public final class MainActivity extends Activity {
             mapRecoveryRequired = true;
         }
         return initialized;
-    }
-
-    private boolean prepareRadarBaseMigration() {
-        SharedPreferences preferences = getSharedPreferences(SETTINGS, MODE_PRIVATE);
-        boolean coordinatesReady = preferences.getBoolean(RADARBASE_COORDINATE_FIX, false);
-        boolean importReady = preferences.getInt(RADARBASE_IMPORT_FORMAT, 0)
-                >= CURRENT_RADARBASE_IMPORT_FORMAT;
-        if (coordinatesReady && importReady) return false;
-        preferences.edit().remove(RADARBASE_ETAG).remove(RADARBASE_MODIFIED).commit();
-        return true;
     }
 
     private void buildUi() {
@@ -559,7 +536,8 @@ public final class MainActivity extends Activity {
         update.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 dialog.dismiss();
-                updateRadarBase();
+                ((GpsAntiRadarApplication) getApplication())
+                        .radarBaseUpdater().requestUpdate();
             }
         });
         mapKey.setOnClickListener(new View.OnClickListener() {
@@ -1282,103 +1260,15 @@ public final class MainActivity extends Activity {
         startForegroundService(intent);
     }
 
-    private void updateRadarBase() {
-        final GpsAntiRadarApplication application =
-                (GpsAntiRadarApplication) getApplication();
-        if (!application.tryStartRadarBaseUpdate()) {
-            Toast.makeText(this, "Обновление базы RadarBase уже выполняется",
-                    Toast.LENGTH_SHORT).show();
-            return;
+    private void showRadarBaseUpdateState(RadarBaseUpdateState state) {
+        if (state.status == RadarBaseUpdateState.Status.IDLE) return;
+        if (state.status == RadarBaseUpdateState.Status.UNCHANGED) {
+            refreshDatabaseCount();
         }
-        Toast.makeText(this, "Обновление базы RadarBase начато",
-                Toast.LENGTH_SHORT).show();
-        new Thread(new Runnable() {
-            @Override public void run() {
-                HttpURLConnection connection = null;
-                try {
-                    connection = (HttpURLConnection) new URL(RADARBASE_URL).openConnection();
-                    connection.setConnectTimeout(15000);
-                    connection.setReadTimeout(120000);
-                    connection.setRequestProperty("Accept", "application/json");
-                    connection.setRequestProperty("Accept-Encoding", "gzip");
-                    SharedPreferences preferences = getSharedPreferences(SETTINGS, MODE_PRIVATE);
-                    String etag = preferences.getString(RADARBASE_ETAG, "");
-                    String modified = preferences.getString(RADARBASE_MODIFIED, "");
-                    if (etag != null && !etag.isEmpty()) connection.setRequestProperty("If-None-Match", etag);
-                    if (modified != null && !modified.isEmpty()) {
-                        connection.setRequestProperty("If-Modified-Since", modified);
-                    }
-                    int status = connection.getResponseCode();
-                    if (status == HttpURLConnection.HTTP_NOT_MODIFIED) {
-                        runOnUiThread(new Runnable() {
-                            @Override public void run() {
-                                refreshDatabaseCount();
-                                Toast.makeText(MainActivity.this, "База RadarBase уже актуальна",
-                                        Toast.LENGTH_LONG).show();
-                            }
-                        });
-                        return;
-                    }
-                    if (status != HttpURLConnection.HTTP_OK) {
-                        throw new IOException("Сервер RadarBase: HTTP " + status);
-                    }
-                    InputStream raw = connection.getInputStream();
-                    InputStream input = "gzip".equalsIgnoreCase(connection.getContentEncoding())
-                            ? new GZIPInputStream(raw) : raw;
-                    RadarBaseParser.Result result;
-                    try (InputStream source = input;
-                         CameraDatabase db = new CameraDatabase(MainActivity.this)) {
-                        result = db.importRadarBase(source);
-                    }
-                    SharedPreferences.Editor editor = preferences.edit();
-                    String newEtag = connection.getHeaderField("ETag");
-                    String newModified = connection.getHeaderField("Last-Modified");
-                    if (newEtag != null) editor.putString(RADARBASE_ETAG, newEtag);
-                    if (newModified != null) editor.putString(RADARBASE_MODIFIED, newModified);
-                    if (result.coordinatesCorrected) {
-                        editor.putBoolean(RADARBASE_COORDINATE_FIX, true);
-                    }
-                    editor.putInt(RADARBASE_IMPORT_FORMAT, CURRENT_RADARBASE_IMPORT_FORMAT);
-                    editor.putLong(RADARBASE_LAST_SUCCESSFUL_DOWNLOAD,
-                            System.currentTimeMillis());
-                    editor.apply();
-                    showRadarBaseImportSuccess(result);
-                } catch (Exception error) {
-                    showRadarBaseImportError(error);
-                } finally {
-                    if (connection != null) connection.disconnect();
-                    application.finishRadarBaseUpdate();
-                }
-            }
-        }, "radarbase-download").start();
-    }
-
-    private void showRadarBaseImportSuccess(final RadarBaseParser.Result result) {
-        getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                .putBoolean(RADARBASE_COORDINATE_FIX, true)
-                .putInt(RADARBASE_IMPORT_FORMAT, CURRENT_RADARBASE_IMPORT_FORMAT)
-                .apply();
-        getApplicationContext().sendBroadcast(
-                new Intent(ACTION_RADARBASE_UPDATED).setPackage(getPackageName()));
-        runOnUiThread(new Runnable() {
-            @Override public void run() {
-                String suffix = result.coordinatesCorrected ? " · координаты восстановлены"
-                        : " · без поправки координат";
-                Toast.makeText(MainActivity.this, "Импортировано: " + result.count + suffix,
-                        Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    private void showRadarBaseImportError(final Exception error) {
-        runOnUiThread(new Runnable() {
-            @Override public void run() {
-                String detail = error.getMessage();
-                Toast.makeText(MainActivity.this, detail == null || detail.trim().isEmpty()
-                                ? "Не удалось загрузить JSON RadarBase" : detail,
-                        Toast.LENGTH_LONG).show();
-            }
-        });
+        int duration = state.status == RadarBaseUpdateState.Status.STARTED
+                || state.status == RadarBaseUpdateState.Status.ALREADY_RUNNING
+                ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG;
+        Toast.makeText(this, state.message, duration).show();
     }
 
     private void refreshDatabaseCount() {
@@ -1502,7 +1392,8 @@ public final class MainActivity extends Activity {
     @Override protected void onStart() {
         super.onStart();
         IntentFilter filter = new IntentFilter(TrackingService.ACTION_UPDATE);
-        IntentFilter radarBaseFilter = new IntentFilter(ACTION_RADARBASE_UPDATED);
+        IntentFilter radarBaseFilter =
+                new IntentFilter(RadarBaseUpdater.ACTION_DATABASE_UPDATED);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
             registerReceiver(radarBaseReceiver, radarBaseFilter, Context.RECEIVER_NOT_EXPORTED);
@@ -1510,6 +1401,8 @@ public final class MainActivity extends Activity {
             registerReceiver(receiver, filter);
             registerReceiver(radarBaseReceiver, radarBaseFilter);
         }
+        ((GpsAntiRadarApplication) getApplication()).radarBaseUpdater()
+                .addListener(radarBaseUpdateListener, true);
         refreshDatabaseCount();
         loadVisibleCameraMarkers();
         if (mapView != null) {
@@ -1523,6 +1416,8 @@ public final class MainActivity extends Activity {
             mapView.onStop();
             MapKitFactory.getInstance().onStop();
         }
+        ((GpsAntiRadarApplication) getApplication()).radarBaseUpdater()
+                .removeListener(radarBaseUpdateListener);
         unregisterReceiver(receiver);
         unregisterReceiver(radarBaseReceiver);
         super.onStop();

@@ -7,12 +7,14 @@ import com.yandex.mapkit.MapKitFactory;
 
 public final class GpsAntiRadarApplication extends Application {
     private static boolean initialized;
-    private final ProcessLaunchGuard radarBaseStartupUpdateGuard = new ProcessLaunchGuard();
     private final RadarBaseUpdateSingleFlight radarBaseUpdateGuard =
             new RadarBaseUpdateSingleFlight();
+    private RadarBaseUpdater radarBaseUpdater;
 
     @Override public void onCreate() {
         super.onCreate();
+        radarBaseUpdater = new RadarBaseUpdater(this, radarBaseUpdateGuard);
+        radarBaseUpdater.requestUpdate();
     }
 
     public static synchronized boolean ensureMapKit(Context context) {
@@ -33,15 +35,7 @@ public final class GpsAntiRadarApplication extends Application {
         }
     }
 
-    public boolean claimRadarBaseStartupUpdate() {
-        return radarBaseStartupUpdateGuard.claim();
-    }
-
-    public boolean tryStartRadarBaseUpdate() {
-        return radarBaseUpdateGuard.tryStart();
-    }
-
-    public void finishRadarBaseUpdate() {
-        radarBaseUpdateGuard.finish();
+    public RadarBaseUpdater radarBaseUpdater() {
+        return radarBaseUpdater;
     }
 }

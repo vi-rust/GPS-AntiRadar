@@ -10,6 +10,8 @@ $database = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed
 $tracking = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\TrackingService.java")
 $activity = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\MainActivity.java")
 $application = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\GpsAntiRadarApplication.java")
+$updateState = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateState.java")
+$updater = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdater.java")
 $snapshot = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java")
 $snapshotAdapter = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshotIntent.java")
 
@@ -73,15 +75,26 @@ if ($activity -match 'databaseView') {
 }
 Assert-Contains -Text $activity -Pattern '\u041e\u0431\u044a\u0435\u043a\u0442\u043e\u0432 \u0432 \u0431\u0430\u0437\u0435:' -Message "About must show the database object count"
 Assert-Contains -Text $activity -Pattern '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0443\u0441\u043f\u0435\u0448\u043d\u0430\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430:' -Message "About must show the last successful download"
-Assert-Contains -Text $activity -Pattern 'putLong\(RADARBASE_LAST_SUCCESSFUL_DOWNLOAD' -Message "a successful import must save its completion time"
-Assert-Contains -Text $activity -Pattern 'System\.currentTimeMillis\(\)' -Message "the stored successful-import time must be current"
-Assert-Contains -Text $activity -Pattern '\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0431\u0430\u0437\u044b RadarBase \u043d\u0430\u0447\u0430\u0442\u043e' -Message "automatic and manual downloads must show the same start feedback"
+Assert-Contains -Text $updater -Pattern '\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0431\u0430\u0437\u044b RadarBase \u043d\u0430\u0447\u0430\u0442\u043e' -Message "automatic and manual downloads must show the same start feedback"
 
-$import = $activity.IndexOf("result = db.importRadarBase(source)")
-$timestamp = $activity.IndexOf("putLong(RADARBASE_LAST_SUCCESSFUL_DOWNLOAD")
-$successUi = $activity.IndexOf("showRadarBaseImportSuccess(result)")
-if ($import -lt 0 -or $timestamp -lt $import -or $successUi -lt $timestamp) {
-    throw "last successful download time must be stored only after import completes"
+if ($activity -match 'HttpURLConnection|new URL\(|GZIPInputStream|RADARBASE_URL|importRadarBase\(') {
+    throw "MainActivity must not own RadarBase network or import work"
+}
+Assert-Contains -Text $activity -Pattern 'radarBaseUpdater\(\)\.requestUpdate\(\)' -Message "the phone update action must delegate to the application updater"
+Assert-Contains -Text $activity -Pattern 'addListener\(radarBaseUpdateListener,\s*true\)' -Message "onStart must replay the latest update state"
+Assert-Contains -Text $activity -Pattern 'removeListener\(radarBaseUpdateListener\)' -Message "onStop must remove the update listener"
+
+$onCreateStart = $application.IndexOf("@Override public void onCreate()")
+$nextMethod = $application.IndexOf("public static synchronized boolean ensureMapKit", $onCreateStart)
+$applicationOnCreate = if ($onCreateStart -ge 0 -and $nextMethod -gt $onCreateStart) {
+    $application.Substring($onCreateStart, $nextMethod - $onCreateStart)
+} else { "" }
+if ([regex]::Matches($applicationOnCreate, 'radarBaseUpdater\.requestUpdate\(\)').Count -ne 1) {
+    throw "Application.onCreate must request exactly one cold-process RadarBase update"
+}
+Assert-Contains -Text $application -Pattern 'new RadarBaseUpdater\(this,\s*radarBaseUpdateGuard\)' -Message "Application must own the process RadarBase updater"
+if ($application -match 'ProcessLaunchGuard|claimRadarBaseStartupUpdate|tryStartRadarBaseUpdate|finishRadarBaseUpdate') {
+    throw "Application cold-start ownership must not remain split across Activity guards"
 }
 
 Assert-Contains -Text $activity -Pattern 'overspeedThreshold\.setMax\(AppSettings\.MAX_OVERSPEED_THRESHOLD_KMH\)' -Message "menu must expose the full 0 to 20 km/h beep range"
@@ -92,8 +105,32 @@ Assert-Contains -Text $tracking -Pattern 'overspeedCandidate\(' -Message "beep s
 Assert-Contains -Text $tracking -Pattern 'speedKmh, overspeedThresholdKmh\)' -Message "beep selection must use the configured tolerance"
 
 Assert-Contains -Text $application -Pattern 'RadarBaseUpdateSingleFlight radarBaseUpdateGuard' -Message "the update guard must live for the whole process"
-Assert-Contains -Text $activity -Pattern 'tryStartRadarBaseUpdate\(\)' -Message "database updates must claim the process-wide single-flight guard"
-Assert-Contains -Text $activity -Pattern 'finishRadarBaseUpdate\(\)' -Message "the process-wide update guard must be released after every result"
+Assert-Contains -Text $updateState -Pattern 'enum Status \{\s*IDLE,\s*STARTED,\s*UNCHANGED,\s*SUCCESS,\s*ERROR,\s*ALREADY_RUNNING\s*\}' -Message "RadarBase update states must expose the shared lifecycle"
+Assert-Contains -Text $updater -Pattern 'volatile RadarBaseUpdateState latestState' -Message "the latest update state must be visible process-wide"
+Assert-Contains -Text $updater -Pattern 'Handler\(Looper\.getMainLooper\(\)\)' -Message "update listeners must be dispatched on the main thread"
+Assert-Contains -Text $updater -Pattern 'new ArrayList<.*>\(listeners\)' -Message "listener callbacks must iterate over a stable copy"
+Assert-Contains -Text $updater -Pattern 'if \(!gate\.tryStart\(\)\)' -Message "all update requests must use the process single-flight gate"
+Assert-Contains -Text $updater -Pattern 'new Thread\([\s\S]*"radarbase-download"\)\.start\(\)' -Message "RadarBase network work must run on the download thread"
+
+$notModifiedStart = $updater.IndexOf("if (status == HttpURLConnection.HTTP_NOT_MODIFIED)")
+$notModifiedEnd = $updater.IndexOf("if (status != HttpURLConnection.HTTP_OK)", $notModifiedStart)
+$notModified = if ($notModifiedStart -ge 0 -and $notModifiedEnd -gt $notModifiedStart) {
+    $updater.Substring($notModifiedStart, $notModifiedEnd - $notModifiedStart)
+} else { "" }
+Assert-Contains -Text $notModified -Pattern 'UNCHANGED' -Message "HTTP 304 must publish UNCHANGED"
+if ($notModified -match 'LAST_SUCCESSFUL_DOWNLOAD|System\.currentTimeMillis') {
+    throw "HTTP 304 must not update the last successful download time"
+}
+
+$import = $updater.IndexOf("result = db.importRadarBase(source)")
+$timestamp = $updater.IndexOf("putLong(AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD")
+$broadcast = $updater.IndexOf("sendBroadcast(")
+$successState = $updater.IndexOf("RadarBaseUpdateState.Status.SUCCESS")
+if ($import -lt 0 -or $timestamp -lt $import -or $broadcast -lt $timestamp -or $successState -lt $broadcast) {
+    throw "HTTP 200 must import, save time, broadcast, then publish SUCCESS"
+}
+Assert-Contains -Text $updater -Pattern 'System\.currentTimeMillis\(\)' -Message "the stored successful-import time must be current"
+Assert-Contains -Text $updater -Pattern 'new Intent\(ACTION_DATABASE_UPDATED\)\.setPackage\(context\.getPackageName\(\)\)' -Message "database replacement broadcast must remain package-scoped"
 Assert-Contains -Text $activity -Pattern 'aboutDatabaseCountView' -Message "the open About count must remain refreshable"
 Assert-Contains -Text $activity -Pattern 'aboutLastDownloadView' -Message "the open About timestamp must remain refreshable"
 $receiverStart = $activity.IndexOf("private final BroadcastReceiver radarBaseReceiver")
