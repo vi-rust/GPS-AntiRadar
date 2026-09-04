@@ -135,6 +135,7 @@ public final class ParserGeoTest {
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
 
+        verifyMapMarkerPresentationEquality();
         if (args.length > 0) {
             final int[] count = {0};
             RadarBaseParser.Result real;
@@ -272,6 +273,92 @@ public final class ParserGeoTest {
         CameraPoint invalid = marker(405, Double.NaN, 37.0, 1);
         check(MapMarkerLayout.create(Collections.singletonList(invalid), 10f).isEmpty(),
                 "invalid coordinates are skipped");
+
+        CameraPoint firstCentroidPoint = marker(409, 55.75, 37.61000, 1);
+        firstCentroidPoint.latitude = Double.longBitsToDouble(4633042932285308929L);
+        CameraPoint secondCentroidPoint = marker(410, 55.75, 37.61000, 1);
+        secondCentroidPoint.latitude = Double.longBitsToDouble(4633042932285309051L);
+        CameraPoint thirdCentroidPoint = marker(411, 55.75, 37.61000, 1);
+        thirdCentroidPoint.latitude = Double.longBitsToDouble(4633042933519876818L);
+        List<CameraPoint> exactCentroidOrder = java.util.Arrays.asList(
+                firstCentroidPoint, secondCentroidPoint, thirdCentroidPoint);
+        List<MapMarkerLayout.Entity> exactOrdered =
+                MapMarkerLayout.create(exactCentroidOrder, 10.4f);
+        List<MapMarkerLayout.Entity> exactPermuted = MapMarkerLayout.create(
+                java.util.Arrays.asList(thirdCentroidPoint, secondCentroidPoint,
+                        firstCentroidPoint), 10.4f);
+        check(exactOrdered.size() == 1
+                        && exactOrdered.get(0).samePresentation(exactPermuted.get(0)),
+                "permuted exact cluster inputs preserve the centroid presentation");
+    }
+
+
+    private static void verifyMapMarkerPresentationEquality() {
+        CameraPoint camera = marker(420, 55.75000, 37.61000, 1);
+        camera.rank = 2.5f;
+        camera.newbie = true;
+        MapMarkerLayout.Entity baseline = individualEntity(camera);
+        check(baseline.samePresentation(individualEntity(copyMarker(camera))),
+                "equivalent individual entities share a presentation");
+
+        CameraPoint changed = copyMarker(camera);
+        changed.id = 421;
+        check(!baseline.samePresentation(individualEntity(changed)), "camera ID changes presentation");
+        changed = copyMarker(camera);
+        changed.latitude = 55.75001;
+        check(!baseline.samePresentation(individualEntity(changed)), "latitude changes presentation");
+        changed = copyMarker(camera);
+        changed.longitude = 37.61001;
+        check(!baseline.samePresentation(individualEntity(changed)), "longitude changes presentation");
+        changed = copyMarker(camera);
+        changed.type = 2;
+        check(!baseline.samePresentation(individualEntity(changed)), "type changes presentation");
+        changed = copyMarker(camera);
+        changed.dirType = 2;
+        check(!baseline.samePresentation(individualEntity(changed)), "direction type changes presentation");
+        changed = copyMarker(camera);
+        changed.direction = 91f;
+        check(!baseline.samePresentation(individualEntity(changed)), "direction changes presentation");
+        changed = copyMarker(camera);
+        changed.distanceMeters = 501;
+        check(!baseline.samePresentation(individualEntity(changed)), "distance changes presentation");
+        changed = copyMarker(camera);
+        changed.reverseDistanceMeters = 101;
+        check(!baseline.samePresentation(individualEntity(changed)),
+                "reverse distance changes presentation");
+        changed = copyMarker(camera);
+        changed.angleDegrees = 21f;
+        check(!baseline.samePresentation(individualEntity(changed)), "angle changes presentation");
+        changed = copyMarker(camera);
+        changed.rank = 3f;
+        check(!baseline.samePresentation(individualEntity(changed)), "rank changes presentation");
+        changed = copyMarker(camera);
+        changed.newbie = false;
+        check(!baseline.samePresentation(individualEntity(changed)), "newbie changes presentation");
+        changed = copyMarker(camera);
+        changed.speedRules = "70";
+        check(!baseline.samePresentation(individualEntity(changed)), "speed rules change presentation");
+    }
+
+    private static MapMarkerLayout.Entity individualEntity(CameraPoint camera) {
+        return MapMarkerLayout.create(Collections.singletonList(camera), 14f).get(0);
+    }
+
+    private static CameraPoint copyMarker(CameraPoint source) {
+        CameraPoint copy = new CameraPoint();
+        copy.id = source.id;
+        copy.latitude = source.latitude;
+        copy.longitude = source.longitude;
+        copy.type = source.type;
+        copy.dirType = source.dirType;
+        copy.direction = source.direction;
+        copy.distanceMeters = source.distanceMeters;
+        copy.reverseDistanceMeters = source.reverseDistanceMeters;
+        copy.angleDegrees = source.angleDegrees;
+        copy.rank = source.rank;
+        copy.newbie = source.newbie;
+        copy.speedRules = source.speedRules;
+        return copy;
     }
 
     private static CameraPoint marker(long id, double latitude, double longitude, int type) {

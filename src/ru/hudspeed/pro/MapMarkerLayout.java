@@ -2,6 +2,7 @@ package ru.gpsantiradar.app;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -82,6 +83,12 @@ public final class MapMarkerLayout {
     }
 
     private static Entity cluster(String key, List<CameraPoint> members) {
+        Collections.sort(members, new Comparator<CameraPoint>() {
+            @Override public int compare(CameraPoint left, CameraPoint right) {
+                return Long.compare(left.id, right.id);
+            }
+        });
+
         List<Long> memberIds = new ArrayList<>();
         double latitude = 0.0;
         double longitude = 0.0;
