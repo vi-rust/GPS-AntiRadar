@@ -47,11 +47,9 @@ import com.yandex.mapkit.geometry.Polygon;
 import com.yandex.mapkit.map.CameraPosition;
 import com.yandex.mapkit.map.CameraListener;
 import com.yandex.mapkit.map.CameraUpdateReason;
-import com.yandex.mapkit.map.Cluster;
-import com.yandex.mapkit.map.ClusterListener;
-import com.yandex.mapkit.map.ClusterizedPlacemarkCollection;
 import com.yandex.mapkit.map.IconStyle;
 import com.yandex.mapkit.map.MapObject;
+import com.yandex.mapkit.map.MapObjectCollection;
 import com.yandex.mapkit.map.MapObjectTapListener;
 import com.yandex.mapkit.map.PlacemarkMapObject;
 import com.yandex.mapkit.map.PolygonMapObject;
@@ -88,6 +86,8 @@ public final class MainActivity extends Activity {
             "https://radarbase.info/export/cache/RU/main_extended.json";
     private static final String RADARBASE_ETAG = "radarbase_etag";
     private static final String RADARBASE_MODIFIED = "radarbase_modified";
+    private static final String ACTION_RADARBASE_UPDATED =
+            "ru.gpsantiradar.app.RADARBASE_UPDATED";
     private static final String RADARBASE_COORDINATE_FIX = "radarbase_coordinate_fix_v1";
     private static final String RADARBASE_IMPORT_FORMAT = "radarbase_import_format";
     private static final int CURRENT_RADARBASE_IMPORT_FORMAT = 2;
@@ -101,8 +101,6 @@ public final class MainActivity extends Activity {
     private TextView distanceView;
     private TextView cameraView;
     private TextView databaseView;
-    private TextView alertStateView;
-    private TextView alertAlgorithmView;
     private LinearLayout hudPanel;
     private FrameLayout mapOverlay;
     private TextView cameraHintView;
@@ -114,17 +112,18 @@ public final class MainActivity extends Activity {
     private double lastLatitude = Double.NaN;
     private double lastLongitude = Double.NaN;
     private PlacemarkMapObject locationPlacemark;
+    private MapObjectCollection cameraMarkerCollection;
+    private MapObjectCollection cameraCoverageCollection;
+    private boolean cameraCoverageVisible;
     private int hintGeneration;
     private int cameraLoadGeneration;
     private final Map<Integer, ImageProvider> markerIcons = new HashMap<>();
     private final Map<Integer, Integer> markerResources = new HashMap<>();
-
-    private final ClusterListener clusterListener = new ClusterListener() {
-        @Override public void onClusterAdded(Cluster cluster) {
-            cluster.getAppearance().setIcon(createClusterIcon(cluster.getSize()));
-            cluster.getAppearance().setZIndex(20f);
-        }
-    };
+    private final Map<Integer, ImageProvider> clusterIcons = new HashMap<>();
+    private final Map<Long, CameraPoint> renderedCameras = new HashMap<>();
+    private final Map<Long, List<PolygonMapObject>> renderedCameraCoverage = new HashMap<>();
+    private final Map<String, PlacemarkMapObject> renderedMarkerObjects = new HashMap<>();
+    private final Map<String, MapMarkerLayout.Entity> renderedMarkerEntities = new HashMap<>();
 
     private final MapObjectTapListener placemarkTapListener = new MapObjectTapListener() {
         @Override public boolean onMapObjectTap(MapObject mapObject, Point point) {
@@ -162,8 +161,6 @@ public final class MainActivity extends Activity {
             int limit = intent.getIntExtra(TrackingService.EXTRA_LIMIT, 0);
             int alertDistance = intent.getIntExtra(TrackingService.EXTRA_ALERT_DISTANCE, 0);
             String camera = intent.getStringExtra(TrackingService.EXTRA_CAMERA);
-            String alertState = intent.getStringExtra(TrackingService.EXTRA_ALERT_STATE);
-            String alertAlgorithm = intent.getStringExtra(TrackingService.EXTRA_ALERT_ALGORITHM);
             lastLatitude = intent.getDoubleExtra(TrackingService.EXTRA_LATITUDE, Double.NaN);
             lastLongitude = intent.getDoubleExtra(TrackingService.EXTRA_LONGITUDE, Double.NaN);
             speedView.setText(Integer.toString(Math.round(speed)));
@@ -179,8 +176,13 @@ public final class MainActivity extends Activity {
             }
             updateLocationMarker();
             centerOnLocationFromGps(speed);
-            if (alertState != null) alertStateView.setText(alertState);
-            if (alertAlgorithm != null) alertAlgorithmView.setText(alertAlgorithm);
+        }
+    };
+
+    private final BroadcastReceiver radarBaseReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            refreshDatabaseCount();
+            loadVisibleCameraMarkers();
         }
     };
 
@@ -189,14 +191,14 @@ public final class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_FULLSCREEN);
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
-        final boolean radarBaseMigration = prepareRadarBaseMigration();
+        prepareRadarBaseMigration();
         mapInitialized = initializeMapKitSafely();
         buildUi();
         refreshDatabaseCount();
         getWindow().getDecorView().post(new Runnable() {
             @Override public void run() { startRequested(); }
         });
-        if (radarBaseMigration) {
+        if (((GpsAntiRadarApplication) getApplication()).claimRadarBaseStartupUpdate()) {
             getWindow().getDecorView().post(new Runnable() {
                 @Override public void run() { updateRadarBase(); }
             });
@@ -343,16 +345,6 @@ public final class MainActivity extends Activity {
         cameraView = text("Объектов впереди не найдено", 13, GREEN, Typeface.BOLD);
         cameraView.setGravity(Gravity.START);
         hudPanel.addView(cameraView);
-        TextView algorithmTitle = text("\u0410\u043b\u0433\u043e\u0440\u0438\u0442\u043c \u043e\u043f\u043e\u0432\u0435\u0449\u0435\u043d\u0438\u044f",
-                11, Color.DKGRAY, Typeface.BOLD);
-        algorithmTitle.setPadding(0, dp(8), 0, 0);
-        hudPanel.addView(algorithmTitle);
-        alertStateView = text("\u041f\u043e\u0438\u0441\u043a \u043e\u0431\u044a\u0435\u043a\u0442\u043e\u0432", 11,
-                Color.rgb(35, 95, 160), Typeface.BOLD);
-        hudPanel.addView(alertStateView);
-        alertAlgorithmView = text(StrelkaAlertAlgorithm.screenSummary(), 10,
-                Color.DKGRAY, Typeface.NORMAL);
-        hudPanel.addView(alertAlgorithmView);
         databaseView = text("База: 0 объектов", 11, Color.DKGRAY, Typeface.NORMAL);
         databaseView.setPadding(0, dp(9), 0, 0);
         hudPanel.addView(databaseView);
@@ -497,6 +489,10 @@ public final class MainActivity extends Activity {
                 ru.gpsantiradar.app.R.drawable.ic_key, "Сменить ключ MapKit");
         content.addView(mapKey, new LinearLayout.LayoutParams(-1, dp(54)));
 
+        final LinearLayout about = menuAction(
+                ru.gpsantiradar.app.R.drawable.ic_info, "О программе");
+        content.addView(about, new LinearLayout.LayoutParams(-1, dp(54)));
+
         final LinearLayout exit = menuAction(
                 ru.gpsantiradar.app.R.drawable.ic_exit, "\u0412\u044b\u0439\u0442\u0438");
         content.addView(exit, new LinearLayout.LayoutParams(-1, dp(54)));
@@ -522,6 +518,12 @@ public final class MainActivity extends Activity {
                 showMapKeyDialog();
             }
         });
+        about.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dialog.dismiss();
+                showAboutDialog();
+            }
+        });
         exit.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 dialog.dismiss();
@@ -530,6 +532,64 @@ public final class MainActivity extends Activity {
         });
         dialog.show();
         styleRoundedDialog(dialog);
+    }
+
+    private void showAboutDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(16), dp(20), dp(12));
+
+        TextView appName = text("GPS AntiRadar", 22, Color.rgb(30, 30, 30), Typeface.BOLD);
+        content.addView(appName, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView currentVersion = text("Версия " + BuildConfig.VERSION_NAME, 14,
+                Color.DKGRAY, Typeface.NORMAL);
+        LinearLayout.LayoutParams currentVersionParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        currentVersionParams.setMargins(0, dp(2), 0, dp(16));
+        content.addView(currentVersion, currentVersionParams);
+
+        TextView historyTitle = text("История релизов", 17,
+                Color.rgb(30, 30, 30), Typeface.BOLD);
+        content.addView(historyTitle, new LinearLayout.LayoutParams(-1, -2));
+
+        for (ReleaseHistory.Entry release : ReleaseHistory.entries()) {
+            View divider = new View(this);
+            divider.setBackgroundColor(Color.rgb(225, 228, 231));
+            LinearLayout.LayoutParams dividerParams =
+                    new LinearLayout.LayoutParams(-1, dp(1));
+            dividerParams.setMargins(0, dp(14), 0, dp(12));
+            content.addView(divider, dividerParams);
+
+            TextView version = text("Версия " + release.version, 15,
+                    GREEN, Typeface.BOLD);
+            content.addView(version, new LinearLayout.LayoutParams(-1, -2));
+
+            TextView changes = text(release.changes, 14,
+                    Color.rgb(45, 45, 45), Typeface.NORMAL);
+            changes.setLineSpacing(dp(2), 1f);
+            LinearLayout.LayoutParams changesParams =
+                    new LinearLayout.LayoutParams(-1, -2);
+            changesParams.setMargins(0, dp(4), 0, 0);
+            content.addView(changes, changesParams);
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+
+        AlertDialog dialog = new AlertDialog.Builder(this,
+                android.R.style.Theme_Material_Light_Dialog_Alert)
+                .setView(scroll)
+                .setNegativeButton("Закрыть", null)
+                .create();
+        dialog.show();
+        styleRoundedDialog(dialog);
+        if (dialog.getWindow() != null) {
+            int availableWidth = getResources().getDisplayMetrics().widthPixels - dp(48);
+            int availableHeight = getResources().getDisplayMetrics().heightPixels - dp(48);
+            dialog.getWindow().setLayout(Math.min(dp(560), availableWidth),
+                    Math.min(dp(520), availableHeight));
+        }
     }
 
     private void exitApplication() {
@@ -743,43 +803,147 @@ public final class MainActivity extends Activity {
     private void renderCameraMarkers(List<CameraPoint> points) {
         if (mapView == null) return;
         com.yandex.mapkit.map.Map map = mapView.getMapWindow().getMap();
-        map.getMapObjects().clear();
-        locationPlacemark = null;
-        if (cameraHintView != null) cameraHintView.setVisibility(View.GONE);
-        hintGeneration++;
-        if (map.getCameraPosition().getZoom() >= COVERAGE_MIN_ZOOM) {
-            for (CameraPoint camera : points) {
-                if (camera.isCameraOrControl()) addCameraCoverage(map, camera);
+        ensureCameraCollections(map);
+        CameraMarkerDiff.Result coverageDiff = CameraMarkerDiff.between(renderedCameras, points);
+        List<MapMarkerLayout.Entity> entities =
+                MapMarkerLayout.create(points, map.getCameraPosition().getZoom());
+        MapMarkerEntityDiff.Result markerDiff =
+                MapMarkerEntityDiff.between(renderedMarkerEntities, entities);
+        boolean showCoverage = map.getCameraPosition().getZoom() >= COVERAGE_MIN_ZOOM;
+        boolean coverageModeChanged = showCoverage != cameraCoverageVisible;
+        boolean markerChanges = !markerDiff.removeKeys.isEmpty()
+                || !markerDiff.update.isEmpty() || !markerDiff.add.isEmpty();
+        if (!markerChanges && !coverageDiff.hasMarkerChanges() && !coverageModeChanged) return;
+
+        if (markerChanges) {
+            if (cameraHintView != null) cameraHintView.setVisibility(View.GONE);
+            hintGeneration++;
+        }
+        for (String key : markerDiff.removeKeys) {
+            PlacemarkMapObject marker = renderedMarkerObjects.remove(key);
+            if (marker != null) cameraMarkerCollection.remove(marker);
+        }
+        for (MapMarkerLayout.Entity entity : markerDiff.update) {
+            PlacemarkMapObject marker = renderedMarkerObjects.get(entity.key);
+            MapMarkerLayout.Entity previous = renderedMarkerEntities.get(entity.key);
+            if (marker != null && previous != null) {
+                updateMarkerEntity(marker, previous, entity);
             }
         }
-        ClusterizedPlacemarkCollection collection = map.getMapObjects()
-                .addClusterizedPlacemarkCollection(new WeakReference<>(clusterListener));
-        IconStyle cameraStyle = new IconStyle()
+        for (MapMarkerLayout.Entity entity : markerDiff.add) {
+            renderedMarkerObjects.put(entity.key, addMarkerEntity(entity));
+        }
+        renderedMarkerEntities.clear();
+        renderedMarkerEntities.putAll(markerDiff.desired);
+
+        for (Long id : coverageDiff.removeIds) {
+            removeCameraCoverage(id);
+        }
+
+        for (CameraPoint camera : coverageDiff.addOrReplace) {
+            if (showCoverage && !coverageModeChanged) {
+                renderedCameraCoverage.put(camera.id, addCameraCoverage(camera));
+            }
+        }
+        renderedCameras.clear();
+        renderedCameras.putAll(coverageDiff.desired);
+
+        if (coverageModeChanged) {
+            cameraCoverageCollection.clear();
+            renderedCameraCoverage.clear();
+            if (showCoverage) {
+                for (CameraPoint camera : renderedCameras.values()) {
+                    renderedCameraCoverage.put(camera.id, addCameraCoverage(camera));
+                }
+            }
+            cameraCoverageVisible = showCoverage;
+        }
+    }
+
+    private void ensureCameraCollections(com.yandex.mapkit.map.Map map) {
+        if (cameraCoverageCollection == null) {
+            cameraCoverageCollection = map.getMapObjects().addCollection();
+        }
+        if (cameraMarkerCollection == null) {
+            cameraMarkerCollection = map.getMapObjects().addCollection();
+        }
+    }
+
+    private PlacemarkMapObject addMarkerEntity(MapMarkerLayout.Entity entity) {
+        Point point = new Point(entity.latitude, entity.longitude);
+        if (entity.cluster) {
+            return cameraMarkerCollection.addPlacemark(point,
+                    clusterIcon(entity.memberIds.size()), clusterMarkerStyle());
+        }
+        CameraPoint camera = entity.camera;
+        PlacemarkMapObject marker = cameraMarkerCollection.addPlacemark(point,
+                iconForCamera(camera), individualMarkerStyle());
+        if (camera.isCameraOrControl()) marker.setDirection(shootingBearing(camera));
+        marker.setUserData(camera);
+        marker.addTapListener(new WeakReference<>(placemarkTapListener));
+        return marker;
+    }
+
+    private void updateMarkerEntity(PlacemarkMapObject marker,
+                                    MapMarkerLayout.Entity previous,
+                                    MapMarkerLayout.Entity current) {
+        if (Double.compare(previous.latitude, current.latitude) != 0
+                || Double.compare(previous.longitude, current.longitude) != 0) {
+            marker.setGeometry(new Point(current.latitude, current.longitude));
+        }
+        if (current.cluster) {
+            if (previous.memberIds.size() != current.memberIds.size()) {
+                marker.setIcon(clusterIcon(current.memberIds.size()));
+            }
+            return;
+        }
+
+        CameraPoint oldCamera = previous.camera;
+        CameraPoint newCamera = current.camera;
+        if (oldCamera.type != newCamera.type) marker.setIcon(iconForCamera(newCamera));
+        float oldDirection = oldCamera.isCameraOrControl() ? shootingBearing(oldCamera) : 0f;
+        float newDirection = newCamera.isCameraOrControl() ? shootingBearing(newCamera) : 0f;
+        if (Float.compare(oldDirection, newDirection) != 0) {
+            marker.setDirection(newDirection);
+        }
+        marker.setUserData(newCamera);
+    }
+
+    private IconStyle individualMarkerStyle() {
+        return new IconStyle()
                 .setAnchor(new android.graphics.PointF(0.5f, 0.5f))
                 .setRotationType(RotationType.ROTATE)
                 .setFlat(true)
                 .setScale(1.0f)
                 .setZIndex(10f);
-        IconStyle roadStyle = new IconStyle()
+    }
+
+    private IconStyle clusterMarkerStyle() {
+        return new IconStyle()
                 .setAnchor(new android.graphics.PointF(0.5f, 0.5f))
                 .setRotationType(RotationType.NO_ROTATION)
                 .setFlat(false)
                 .setScale(1.0f)
-                .setZIndex(10f);
-        for (CameraPoint camera : points) {
-            PlacemarkMapObject mark = collection.addPlacemark(
-                    new Point(camera.latitude, camera.longitude),
-                    iconForCamera(camera), camera.isCameraOrControl() ? cameraStyle : roadStyle);
-            if (camera.isCameraOrControl()) mark.setDirection(shootingBearing(camera));
-            mark.setUserData(camera);
-            mark.addTapListener(new WeakReference<>(placemarkTapListener));
-        }
-        collection.clusterPlacemarks(52.0, 14);
-        updateLocationMarker();
+                .setZIndex(20f);
     }
 
-    private void addCameraCoverage(com.yandex.mapkit.map.Map map, CameraPoint camera) {
-        if (!camera.isCameraOrControl()) return;
+    private ImageProvider clusterIcon(int count) {
+        ImageProvider cached = clusterIcons.get(count);
+        if (cached != null) return cached;
+        ImageProvider result = createClusterIcon(count);
+        clusterIcons.put(count, result);
+        return result;
+    }
+
+    private void removeCameraCoverage(long id) {
+        List<PolygonMapObject> coverage = renderedCameraCoverage.remove(id);
+        if (coverage == null) return;
+        for (PolygonMapObject polygon : coverage) cameraCoverageCollection.remove(polygon);
+    }
+
+    private List<PolygonMapObject> addCameraCoverage(CameraPoint camera) {
+        List<PolygonMapObject> result = new ArrayList<>();
+        if (!camera.isCameraOrControl()) return result;
         int baseColor = markerColor(camera.isObservation()
                 ? OBSERVATION_MARKER : camera.type);
         int fill = Color.argb(52, Color.red(baseColor), Color.green(baseColor),
@@ -788,39 +952,41 @@ public final class MainActivity extends Activity {
                 Color.blue(baseColor));
         Point origin = new Point(camera.latitude, camera.longitude);
         if (camera.dirType == 0) {
-            addCoverageCircle(map, origin, camera.distanceMeters, fill, stroke);
-            return;
+            addCoverageCircle(origin, camera.distanceMeters, fill, stroke, result);
+            return result;
         }
         float halfAngle = Math.max(1f, camera.angleDegrees / 2f);
-        addCoverageSector(map, origin, primaryCoverageBearing(camera), camera.distanceMeters,
-                halfAngle, fill, stroke);
+        addCoverageSector(origin, primaryCoverageBearing(camera), camera.distanceMeters,
+                halfAngle, fill, stroke, result);
         if (camera.hasReverseZone()) {
             int reverseFill = Color.argb(30, Color.red(baseColor), Color.green(baseColor),
                     Color.blue(baseColor));
-            addCoverageSector(map, origin, camera.direction, camera.reverseDistanceMeters,
-                    halfAngle, reverseFill, stroke);
+            addCoverageSector(origin, camera.direction, camera.reverseDistanceMeters,
+                    halfAngle, reverseFill, stroke, result);
         }
+        return result;
     }
 
-    private void addCoverageCircle(com.yandex.mapkit.map.Map map, Point origin,
-                                   double radiusMeters, int fill, int stroke) {
+    private void addCoverageCircle(Point origin, double radiusMeters, int fill, int stroke,
+                                   List<PolygonMapObject> result) {
         if (radiusMeters <= 0) return;
         List<Point> boundary = new ArrayList<>();
         for (int bearing = 0; bearing <= 360; bearing += 10) {
             boundary.add(destination(origin, bearing, radiusMeters));
         }
         Polygon polygon = new Polygon(new LinearRing(boundary), Collections.emptyList());
-        PolygonMapObject circle = map.getMapObjects().addPolygon(polygon);
+        PolygonMapObject circle = cameraCoverageCollection.addPolygon(polygon);
         circle.setFillColor(fill);
         circle.setStrokeColor(stroke);
         circle.setStrokeWidth(1.2f);
         circle.setGeodesic(true);
         circle.setZIndex(2f);
+        result.add(circle);
     }
 
-    private void addCoverageSector(com.yandex.mapkit.map.Map map, Point origin,
-                                   float bearing, double rangeMeters, float halfAngle,
-                                   int fill, int stroke) {
+    private void addCoverageSector(Point origin, float bearing, double rangeMeters,
+                                   float halfAngle, int fill, int stroke,
+                                   List<PolygonMapObject> result) {
         if (rangeMeters <= 0) return;
         List<Point> boundary = new ArrayList<>();
         boundary.add(origin);
@@ -831,12 +997,13 @@ public final class MainActivity extends Activity {
         boundary.add(destination(origin, bearing + halfAngle, rangeMeters));
         boundary.add(origin);
         Polygon polygon = new Polygon(new LinearRing(boundary), Collections.emptyList());
-        PolygonMapObject sector = map.getMapObjects().addPolygon(polygon);
+        PolygonMapObject sector = cameraCoverageCollection.addPolygon(polygon);
         sector.setFillColor(fill);
         sector.setStrokeColor(stroke);
         sector.setStrokeWidth(1.2f);
         sector.setGeodesic(true);
         sector.setZIndex(2f);
+        result.add(sector);
     }
 
     private Point destination(Point start, double bearingDegrees, double distanceMeters) {
@@ -1087,6 +1254,8 @@ public final class MainActivity extends Activity {
                 .putBoolean(RADARBASE_COORDINATE_FIX, true)
                 .putInt(RADARBASE_IMPORT_FORMAT, CURRENT_RADARBASE_IMPORT_FORMAT)
                 .apply();
+        getApplicationContext().sendBroadcast(
+                new Intent(ACTION_RADARBASE_UPDATED).setPackage(getPackageName()));
         runOnUiThread(new Runnable() {
             @Override public void run() {
                 databaseView.setText("База: " + result.count + " объектов");
@@ -1094,7 +1263,6 @@ public final class MainActivity extends Activity {
                         : " · без поправки координат";
                 Toast.makeText(MainActivity.this, "Импортировано: " + result.count + suffix,
                         Toast.LENGTH_LONG).show();
-                loadCameraMarkers(true);
             }
         });
     }
@@ -1203,11 +1371,16 @@ public final class MainActivity extends Activity {
     @Override protected void onStart() {
         super.onStart();
         IntentFilter filter = new IntentFilter(TrackingService.ACTION_UPDATE);
+        IntentFilter radarBaseFilter = new IntentFilter(ACTION_RADARBASE_UPDATED);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(radarBaseReceiver, radarBaseFilter, Context.RECEIVER_NOT_EXPORTED);
         } else {
             registerReceiver(receiver, filter);
+            registerReceiver(radarBaseReceiver, radarBaseFilter);
         }
+        refreshDatabaseCount();
+        loadVisibleCameraMarkers();
         if (mapView != null) {
             MapKitFactory.getInstance().onStart();
             mapView.onStart();
@@ -1220,6 +1393,7 @@ public final class MainActivity extends Activity {
             MapKitFactory.getInstance().onStop();
         }
         unregisterReceiver(receiver);
+        unregisterReceiver(radarBaseReceiver);
         super.onStop();
     }
 
