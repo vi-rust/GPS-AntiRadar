@@ -227,6 +227,8 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
+Assert-Contains $buildGradle 'versionCode\s*=\s*40' "release must use versionCode 40"
+Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.5'" "release must use versionName 4.9.5"
 Assert-Contains $buildGradle 'androidComponents\s*\{[\s\S]*beforeVariants\(selector\(\)\.withBuildType\("release"\)\)[\s\S]*enableUnitTest\s*=\s*true' "AGP must create a real release unit-test variant"
 foreach ($dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
@@ -247,6 +249,11 @@ $wrongScopeAndroidAutoDependency = "testImplementation 'androidx.car.app:app:1.7
 if (Test-ActiveGradleDependency $wrongScopeAndroidAutoDependency "implementation" "androidx.car.app:app:1.7.0") {
     throw "Android Auto dependencies must use their required Gradle configuration"
 }
+
+$readme = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "README.md")
+Assert-Contains $readme 'Android Auto' "README must document Android Auto"
+Assert-Contains $readme 'TrackingService' "README must describe the shared alert service"
+Assert-Contains $readme 'DHU' "README must document Desktop Head Unit testing"
 
 $automotiveDescriptorPath = Join-Path $Project "res\xml\automotive_app_desc.xml"
 if (-not (Test-Path $automotiveDescriptorPath)) {
