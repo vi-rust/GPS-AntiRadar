@@ -223,6 +223,11 @@ public final class MainActivity extends Activity {
                         runOnUiThread(action);
                     }
 
+                    @Override public void onMarkerPresentationChanged() {
+                        if (cameraHintView != null) cameraHintView.setVisibility(View.GONE);
+                        hintGeneration++;
+                    }
+
                     @Override public void onCameraTapped(CameraPoint camera, Point position) {
                         showCameraHint(camera, position);
                         final int generation = ++hintGeneration;

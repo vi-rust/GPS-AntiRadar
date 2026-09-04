@@ -38,6 +38,7 @@ import java.util.Map;
 public final class SharedCameraMapLayer {
     public interface Host {
         void postToUi(Runnable action);
+        void onMarkerPresentationChanged();
         void onCameraTapped(CameraPoint camera, Point position);
     }
 
@@ -103,7 +104,7 @@ public final class SharedCameraMapLayer {
         if (context == null) throw new IllegalArgumentException("context is required");
         if (mapWindow == null) throw new IllegalArgumentException("mapWindow is required");
         if (host == null) throw new IllegalArgumentException("host is required");
-        this.context = context;
+        this.context = context.getApplicationContext();
         this.mapWindow = mapWindow;
         this.host = host;
         map = mapWindow.getMap();
@@ -172,8 +173,8 @@ public final class SharedCameraMapLayer {
                 Math.max(region.getTopRight().getLongitude(),
                         region.getBottomRight().getLongitude()));
 
-        double latPadding = Math.max(0.02, (north - south) * 0.20);
-        double lonPadding = Math.max(0.02, (east - west) * 0.20);
+        double latPadding = (north - south) * 0.20;
+        double lonPadding = (east - west) * 0.20;
         final double querySouth = Math.max(-90.0, south - latPadding);
         final double queryNorth = Math.min(90.0, north + latPadding);
         final double queryWest = Math.max(-180.0, west - lonPadding);
@@ -201,6 +202,7 @@ public final class SharedCameraMapLayer {
         }, "visible-camera-load").start();
     }
 
+    /** Updates the position and suppresses redundant following below 1 km/h. */
     public void updateCurrentLocation(double latitude, double longitude, float speedKmh) {
         if (destroyed) return;
         lastLatitude = latitude;
@@ -295,6 +297,10 @@ public final class SharedCameraMapLayer {
                 || !markerDiff.update.isEmpty() || !markerDiff.add.isEmpty();
         if (!markerChanges && !coverageDiff.hasMarkerChanges() && !coverageModeChanged) return;
 
+        if (markerChanges) {
+            Host activeHost = host;
+            if (activeHost != null) activeHost.onMarkerPresentationChanged();
+        }
         for (String key : markerDiff.removeKeys) {
             PlacemarkMapObject marker = renderedMarkerObjects.remove(key);
             if (marker != null) cameraMarkerCollection.remove(marker);
@@ -593,7 +599,7 @@ public final class SharedCameraMapLayer {
         com.yandex.mapkit.map.Map activeMap = map;
         if (activeMap == null || Double.isNaN(lastLatitude) || Double.isNaN(lastLongitude)) return;
         if (SystemClock.elapsedRealtime() < followPausedUntil) return;
-        if (mapCenteredOnGps && speedKmh <= 0f) return;
+        if (mapCenteredOnGps && speedKmh < 1f) return;
         CameraPosition current = activeMap.getCameraPosition();
         float zoom = mapCenteredOnGps ? current.getZoom() : 15f;
         activeMap.move(new CameraPosition(new Point(lastLatitude, lastLongitude), zoom,

@@ -43,16 +43,36 @@ if ($update -lt 0 -or $accept -lt $update) {
     throw "radar scan recovery was consumed before the tracker accepted the scan"
 }
 
-Assert-Contains $sharedMapLayer '\(north - south\) \* 0\.20' "latitude map-query padding must remain 20 percent"
-Assert-Contains $sharedMapLayer '\(east - west\) \* 0\.20' "longitude map-query padding must remain 20 percent"
+Assert-Contains $sharedMapLayer 'double latPadding = \(north - south\) \* 0\.20;' "latitude map-query padding must be exactly 20 percent"
+Assert-Contains $sharedMapLayer 'double lonPadding = \(east - west\) \* 0\.20;' "longitude map-query padding must be exactly 20 percent"
+if ($sharedMapLayer -match 'Math\.max\(0\.02,') {
+    throw "viewport queries must not impose a minimum degree padding"
+}
 Assert-Contains $sharedMapLayer 'MapMarkerEntityDiff\.between' "shared map rendering must preserve world-anchored entity diffing"
 Assert-Contains $sharedMapLayer 'interface Host' "shared map rendering must expose host callbacks"
+Assert-Contains $sharedMapLayer 'void onMarkerPresentationChanged\(\)' "marker changes must explicitly invalidate the host presentation"
 foreach ($method in @("loadInitial", "refreshVisible", "updateCurrentLocation",
         "moveToCurrentLocation", "zoomBy", "pauseFollowing", "resumeFollowing", "destroy")) {
     Assert-Contains $sharedMapLayer ([regex]::Escape("void $method(")) "SharedCameraMapLayer must expose $method"
 }
 Assert-Contains $sharedMapLayer 'removeCameraListener' "destroy must remove the layer camera listener"
 Assert-Contains $sharedMapLayer 'generation == cameraLoadGeneration && !destroyed' "stale camera loads must not render after replacement or destroy"
+Assert-Contains $sharedMapLayer 'this\.context = context\.getApplicationContext\(\);' "async map work must not retain an Activity context"
+Assert-Contains $sharedMapLayer 'updateCurrentLocation\(double latitude, double longitude, float speedKmh\)' "location updates must name the movement input speedKmh"
+Assert-Contains $sharedMapLayer 'mapCenteredOnGps && speedKmh < 1f' "stationary updates below 1 km/h must not keep moving the followed map"
+Assert-Contains $activity 'snapshot\.latitude, snapshot\.longitude, snapshot\.speedKmh' "phone map following must use snapshot speed"
+$markerChangesStart = $sharedMapLayer.IndexOf("boolean markerChanges")
+$markerRemoveStart = $sharedMapLayer.IndexOf("for (String key", $markerChangesStart)
+$markerChangesBlock = if ($markerChangesStart -ge 0 -and $markerRemoveStart -gt $markerChangesStart) {
+    $sharedMapLayer.Substring($markerChangesStart, $markerRemoveStart - $markerChangesStart)
+} else { "" }
+Assert-Contains $markerChangesBlock 'if \(markerChanges\)[\s\S]*onMarkerPresentationChanged\(\)' "only an entity add, update, or removal may invalidate the camera hint"
+$activityMapHostStart = $activity.IndexOf("new SharedCameraMapLayer.Host")
+$activityMapHostEnd = $activity.IndexOf("});", $activityMapHostStart)
+$activityMapHost = if ($activityMapHostStart -ge 0 -and $activityMapHostEnd -gt $activityMapHostStart) {
+    $activity.Substring($activityMapHostStart, $activityMapHostEnd - $activityMapHostStart)
+} else { "" }
+Assert-Contains $activityMapHost 'onMarkerPresentationChanged\(\)[\s\S]*cameraHintView\.setVisibility\(View\.GONE\)[\s\S]*hintGeneration\+\+' "phone marker changes must immediately invalidate the visible hint"
 $initialLoadStart = $sharedMapLayer.IndexOf("public void loadInitial")
 $refreshVisibleStart = $sharedMapLayer.IndexOf("public void refreshVisible", $initialLoadStart)
 $initialLoad = if ($initialLoadStart -ge 0 -and $refreshVisibleStart -gt $initialLoadStart) {
