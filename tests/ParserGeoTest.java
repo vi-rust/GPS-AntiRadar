@@ -147,6 +147,7 @@ public final class ParserGeoTest {
         verifyRadarScanRecoveryGate();
         verifyKnownReleaseHistory();
         verifyProcessLaunchGuard();
+        verifyMapKitLifecycle();
         verifyRadarBaseUpdateSingleFlight();
         verifyRadarBaseUpdateStates();
         verifyRadarBaseUpdateListenerRegistry();
@@ -428,6 +429,31 @@ public final class ParserGeoTest {
         ProcessLaunchGuard guard = new ProcessLaunchGuard();
         check(guard.claim(), "cold process launch starts the RadarBase update");
         check(!guard.claim(), "activity recreation does not repeat the startup update");
+    }
+
+    private static void verifyMapKitLifecycle() {
+        final AtomicInteger starts = new AtomicInteger();
+        final AtomicInteger stops = new AtomicInteger();
+        MapKitLifecycle lifecycle = new MapKitLifecycle(new MapKitLifecycle.Delegate() {
+            @Override public void onStart() {
+                starts.incrementAndGet();
+            }
+
+            @Override public void onStop() {
+                stops.incrementAndGet();
+            }
+        });
+        lifecycle.acquire();
+        lifecycle.acquire();
+        lifecycle.release();
+        lifecycle.release();
+        lifecycle.release();
+        check(starts.get() == 1 && stops.get() == 1,
+                "MapKit starts and stops once for overlapping surfaces");
+        lifecycle.acquire();
+        lifecycle.release();
+        check(starts.get() == 2 && stops.get() == 2,
+                "extra MapKit release does not make the lifecycle count negative");
     }
 
     private static void verifyRadarBaseUpdateSingleFlight() {

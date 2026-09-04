@@ -7,6 +7,16 @@ import com.yandex.mapkit.MapKitFactory;
 
 public final class GpsAntiRadarApplication extends Application {
     private static boolean initialized;
+    private final MapKitLifecycle mapKitLifecycle = new MapKitLifecycle(
+            new MapKitLifecycle.Delegate() {
+                @Override public void onStart() {
+                    MapKitFactory.getInstance().onStart();
+                }
+
+                @Override public void onStop() {
+                    MapKitFactory.getInstance().onStop();
+                }
+            });
     private final RadarBaseUpdateSingleFlight radarBaseUpdateGuard =
             new RadarBaseUpdateSingleFlight();
     private RadarBaseUpdater radarBaseUpdater;
@@ -33,6 +43,14 @@ public final class GpsAntiRadarApplication extends Application {
         } catch (Throwable error) {
             return false;
         }
+    }
+
+    public void acquireMapKit() {
+        mapKitLifecycle.acquire();
+    }
+
+    public void releaseMapKit() {
+        mapKitLifecycle.release();
     }
 
     public RadarBaseUpdater radarBaseUpdater() {

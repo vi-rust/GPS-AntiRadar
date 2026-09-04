@@ -26,6 +26,7 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\RadarScanGate.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\ReleaseHistory.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\ProcessLaunchGuard.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\MapKitLifecycle.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateSingleFlight.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateState.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateListenerRegistry.java") `

@@ -28,6 +28,7 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -40,7 +41,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.yandex.mapkit.Animation;
-import com.yandex.mapkit.MapKitFactory;
 import com.yandex.mapkit.ScreenPoint;
 import com.yandex.mapkit.geometry.LinearRing;
 import com.yandex.mapkit.geometry.Point;
@@ -175,9 +175,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                | WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        applyImmersiveMode();
         mapInitialized = initializeMapKitSafely();
         buildUi();
         refreshDatabaseCount();
@@ -193,6 +192,36 @@ public final class MainActivity extends Activity {
                 }
             }, 5000);
         }
+    }
+
+    private void applyImmersiveMode() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.systemBars());
+                controller.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+            return;
+        }
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        applyImmersiveMode();
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applyImmersiveMode();
     }
 
     private boolean initializeMapKitSafely() {
@@ -285,9 +314,22 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 30) {
             overlay.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
                 @Override public WindowInsets onApplyWindowInsets(View view, WindowInsets windowInsets) {
-                    Insets bars = windowInsets.getInsets(WindowInsets.Type.systemBars());
-                    view.setPadding(sidePadding + bars.left, topPadding + bars.top,
-                            sidePadding + bars.right, bottomPadding + bars.bottom);
+                    Insets cutout = windowInsets.getInsets(WindowInsets.Type.displayCutout());
+                    view.setPadding(sidePadding + cutout.left, topPadding + cutout.top,
+                            sidePadding + cutout.right, bottomPadding + cutout.bottom);
+                    return windowInsets;
+                }
+            });
+        } else if (Build.VERSION.SDK_INT >= 28) {
+            overlay.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                @Override public WindowInsets onApplyWindowInsets(View view, WindowInsets windowInsets) {
+                    android.view.DisplayCutout cutout = windowInsets.getDisplayCutout();
+                    int left = cutout == null ? 0 : cutout.getSafeInsetLeft();
+                    int top = cutout == null ? 0 : cutout.getSafeInsetTop();
+                    int right = cutout == null ? 0 : cutout.getSafeInsetRight();
+                    int bottom = cutout == null ? 0 : cutout.getSafeInsetBottom();
+                    view.setPadding(sidePadding + left, topPadding + top,
+                            sidePadding + right, bottomPadding + bottom);
                     return windowInsets;
                 }
             });
@@ -1406,7 +1448,7 @@ public final class MainActivity extends Activity {
         refreshDatabaseCount();
         loadVisibleCameraMarkers();
         if (mapView != null) {
-            MapKitFactory.getInstance().onStart();
+            ((GpsAntiRadarApplication) getApplication()).acquireMapKit();
             mapView.onStart();
         }
     }
@@ -1414,7 +1456,7 @@ public final class MainActivity extends Activity {
     @Override protected void onStop() {
         if (mapView != null) {
             mapView.onStop();
-            MapKitFactory.getInstance().onStop();
+            ((GpsAntiRadarApplication) getApplication()).releaseMapKit();
         }
         ((GpsAntiRadarApplication) getApplication()).radarBaseUpdater()
                 .removeListener(radarBaseUpdateListener);

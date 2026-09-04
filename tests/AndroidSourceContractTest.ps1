@@ -10,6 +10,7 @@ $database = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed
 $tracking = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\TrackingService.java")
 $activity = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\MainActivity.java")
 $application = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\GpsAntiRadarApplication.java")
+$mapKitLifecycle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\MapKitLifecycle.java")
 $updateState = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateState.java")
 $updater = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdater.java")
 $listenerRegistry = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateListenerRegistry.java")
@@ -141,4 +142,29 @@ $receiver = if ($receiverStart -ge 0 -and $receiverEnd -gt $receiverStart) {
 } else { "" }
 Assert-Contains -Text $receiver -Pattern 'refreshAboutDatabaseInfo\(\)' -Message "a successful update broadcast must refresh an open About dialog"
 
+Assert-Contains -Text $mapKitLifecycle -Pattern "interface Delegate" -Message "MapKit lifecycle must delegate global start and stop"
+Assert-Contains -Text $application -Pattern "MapKitLifecycle mapKitLifecycle" -Message "Application must own the process MapKit lifecycle"
+Assert-Contains -Text $application -Pattern "void acquireMapKit" -Message "Application must expose MapKit acquisition"
+Assert-Contains -Text $application -Pattern "void releaseMapKit" -Message "Application must expose MapKit release"
+Assert-Contains -Text $application -Pattern "MapKitFactory.getInstance...onStart" -Message "Application lifecycle must start MapKit"
+Assert-Contains -Text $application -Pattern "getInstance...onStop" -Message "Application lifecycle must stop MapKit"
+if ($activity -match "MapKitFactory.getInstance...on(?:Start|Stop)") {
+    throw "MainActivity must acquire and release the application-owned MapKit lifecycle"
+}
+Assert-Contains -Text $activity -Pattern "applyImmersiveMode" -Message "MainActivity must define immersive phone mode"
+Assert-Contains -Text $activity -Pattern "onWindowFocusChanged" -Message "MainActivity must restore immersive mode after focus returns"
+Assert-Contains -Text $activity -Pattern "hasFocus. applyImmersiveMode" -Message "immersive mode must restore only when focus returns"
+Assert-Contains -Text $activity -Pattern "WindowInsets.Type.displayCutout" -Message "HUD must only inset for the display cutout"
+$onCreateStart = $activity.IndexOf("@Override protected void onCreate")
+$onCreateEnd = $activity.IndexOf("private boolean initializeMapKitSafely", $onCreateStart)
+$activityOnCreate = if ($onCreateStart -ge 0 -and $onCreateEnd -gt $onCreateStart) {
+    $activity.Substring($onCreateStart, $onCreateEnd - $onCreateStart)
+} else { "" }
+Assert-Contains -Text $activityOnCreate -Pattern "applyImmersiveMode" -Message "onCreate must apply immersive phone mode"
+$onResumeStart = $activity.IndexOf("@Override protected void onResume")
+$onResumeEnd = $activity.IndexOf("@Override", $onResumeStart + 1)
+$activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStart) {
+    $activity.Substring($onResumeStart, $onResumeEnd - $onResumeStart)
+} else { "" }
+Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 Write-Output "AndroidSourceContractTest: OK"
