@@ -31,6 +31,7 @@ public final class TrackingService extends Service implements LocationListener {
     public static final String EXTRA_SPEED = "speed";
     public static final String EXTRA_DISTANCE = "distance";
     public static final String EXTRA_CAMERA = "camera";
+    public static final String EXTRA_CAMERA_ID = "camera_id";
     public static final String EXTRA_LIMIT = "limit";
     public static final String EXTRA_ALERT_DISTANCE = "alert_distance";
     public static final String EXTRA_ACCURACY = "accuracy";
@@ -141,8 +142,7 @@ public final class TrackingService extends Service implements LocationListener {
             alertedCameraId = -1;
             finalWarning = false;
         } else {
-            int alertDistance = getSharedPreferences("settings", MODE_PRIVATE)
-                    .getInt("alert_distance", 800);
+            int alertDistance = configuredAlertDistance();
             if (nearestCamera.id != alertedCameraId && nearestCameraDistance <= alertDistance) {
                 alertedCameraId = nearestCamera.id;
                 finalWarning = false;
@@ -183,11 +183,12 @@ public final class TrackingService extends Service implements LocationListener {
         update.putExtra(EXTRA_LONGITUDE, location.getLongitude());
         update.putExtra(EXTRA_DISTANCE, nearest == null ? -1 : (int) Math.round(nearestDistance));
         update.putExtra(EXTRA_CAMERA, nearest == null ? "" : nearest.typeName());
+        update.putExtra(EXTRA_CAMERA_ID, nearest == null ? -1L : nearest.id);
         update.putExtra(EXTRA_LIMIT, nearest == null || nearest.isRoadObject()
                 ? 0 : nearest.currentSpeedLimit());
         update.putExtra(EXTRA_ALERT_DISTANCE, nearest == null ? 0
                 : nearest.isRoadObject() ? roadAlertDistance(nearest)
-                : getSharedPreferences("settings", MODE_PRIVATE).getInt("alert_distance", 800));
+                : configuredAlertDistance());
         sendBroadcast(update);
 
         String line = nearest == null ? Math.round(speedKmh) + " км/ч"
@@ -199,6 +200,13 @@ public final class TrackingService extends Service implements LocationListener {
 
     private boolean strelkaAlertsEnabled() {
         return true;
+    }
+
+    private int configuredAlertDistance() {
+        return AppSettings.clampAlertDistance(
+                getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
+                        .getInt(AppSettings.ALERT_DISTANCE,
+                                AppSettings.DEFAULT_ALERT_DISTANCE_METERS));
     }
 
     private void onStrelkaLocationChanged(Location location) {
@@ -224,9 +232,7 @@ public final class TrackingService extends Service implements LocationListener {
         } else if (!Float.isNaN(radarHeading)) {
             heading = radarHeading;
         }
-        int fallbackAlertDistance = getSharedPreferences(
-                AppSettings.PREFERENCES, MODE_PRIVATE)
-                .getInt(AppSettings.ALERT_DISTANCE, 800);
+        int fallbackAlertDistance = configuredAlertDistance();
         int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
                 getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
                         .getInt(AppSettings.OVERSPEED_THRESHOLD,
@@ -428,6 +434,7 @@ public final class TrackingService extends Service implements LocationListener {
         update.putExtra(EXTRA_DISTANCE,
                 nearest == null ? -1 : (int) Math.round(nearestDistance));
         update.putExtra(EXTRA_CAMERA, nearest == null ? "" : nearest.typeName());
+        update.putExtra(EXTRA_CAMERA_ID, nearest == null ? -1L : nearest.id);
         update.putExtra(EXTRA_LIMIT,
                 nearest == null || nearest.isRoadObject() ? 0 : nearest.currentSpeedLimit());
         update.putExtra(EXTRA_ALERT_DISTANCE, nearest == null ? 0 : alertDistance);

@@ -71,7 +71,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
 
@@ -81,7 +80,6 @@ public final class MainActivity extends Activity {
     private static final int NOTIFICATION_REQUEST = 102;
     private static final int GREEN = Color.rgb(0, 166, 82);
     private static final String SETTINGS = AppSettings.PREFERENCES;
-    private static final String MAPKIT_KEY = "yandex_mapkit_key";
     private static final String MAPKIT_PENDING = "mapkit_startup_pending";
     private static final String MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4";
     private static final String MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5";
@@ -97,7 +95,6 @@ public final class MainActivity extends Activity {
     private static final String RADARBASE_COORDINATE_FIX = "radarbase_coordinate_fix_v1";
     private static final String RADARBASE_IMPORT_FORMAT = "radarbase_import_format";
     private static final int CURRENT_RADARBASE_IMPORT_FORMAT = 2;
-    private static final String HUD_TRANSPARENCY = "hud_transparency";
     private static final int MAX_VISIBLE_MARKERS = 5000;
     private static final float COVERAGE_MIN_ZOOM = 13f;
     private static final long HINT_ANIMATION_MS = 220L;
@@ -163,26 +160,15 @@ public final class MainActivity extends Activity {
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            float speed = intent.getFloatExtra(TrackingService.EXTRA_SPEED, 0);
-            int distance = intent.getIntExtra(TrackingService.EXTRA_DISTANCE, -1);
-            int limit = intent.getIntExtra(TrackingService.EXTRA_LIMIT, 0);
-            int alertDistance = intent.getIntExtra(TrackingService.EXTRA_ALERT_DISTANCE, 0);
-            String camera = intent.getStringExtra(TrackingService.EXTRA_CAMERA);
-            lastLatitude = intent.getDoubleExtra(TrackingService.EXTRA_LATITUDE, Double.NaN);
-            lastLongitude = intent.getDoubleExtra(TrackingService.EXTRA_LONGITUDE, Double.NaN);
-            speedView.setText(Integer.toString(Math.round(speed)));
-            if (distance >= 0) {
-                distanceView.setText(formatDistance(distance));
-                cameraView.setText(camera + (limit > 0 ? "  ·  " + limit + " км/ч" : ""));
-                cameraView.setTextColor(distance <= alertDistance
-                        ? Color.rgb(255, 190, 55) : GREEN);
-            } else {
-                distanceView.setText("—");
-                cameraView.setText("Объектов впереди не найдено");
-                cameraView.setTextColor(GREEN);
-            }
+            DrivingSnapshot snapshot = DrivingSnapshotIntent.from(intent);
+            DrivingHudPresentation presentation = DrivingHudPresentation.from(snapshot);
+            lastLatitude = snapshot.latitude; lastLongitude = snapshot.longitude;
+            speedView.setText(presentation.speedText);
+            distanceView.setText(presentation.distanceText);
+            cameraView.setText(presentation.cameraText);
+            cameraView.setTextColor(presentation.speedColor);
             updateLocationMarker();
-            centerOnLocationFromGps(speed);
+            centerOnLocationFromGps(snapshot.speedKmh);
         }
     };
 
@@ -228,9 +214,9 @@ public final class MainActivity extends Activity {
         // Version 3.2 could report an initialized SDK even when the server rejected
         // the entered value. Ask once for a fresh MapKit Mobile SDK key.
         if (!preferences.getBoolean(MAPKIT_KEY_REENTRY, false)) {
-            boolean hadStoredKey = preferences.contains(MAPKIT_KEY);
+            boolean hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY);
             preferences.edit().putBoolean(MAPKIT_KEY_REENTRY, true)
-                    .remove(MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+                    .remove(AppSettings.MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
             mapRecoveryRequired = hadStoredKey;
             if (hadStoredKey) return false;
         }
@@ -245,10 +231,10 @@ public final class MainActivity extends Activity {
         // Version 3 initialized MapKit before an Activity existed and could leave the app
         // in a startup crash loop. Discard that stored key once when upgrading.
         if (!preferences.getBoolean(MAPKIT_SAFE_MIGRATION, false)) {
-            boolean hadStoredKey = preferences.contains(MAPKIT_KEY);
+            boolean hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY);
             preferences.edit()
                     .putBoolean(MAPKIT_SAFE_MIGRATION, true)
-                    .remove(MAPKIT_KEY)
+                    .remove(AppSettings.MAPKIT_KEY)
                     .remove(MAPKIT_PENDING)
                     .commit();
             mapRecoveryRequired = hadStoredKey;
@@ -256,12 +242,13 @@ public final class MainActivity extends Activity {
         }
 
         if (preferences.getBoolean(MAPKIT_PENDING, false)) {
-            preferences.edit().remove(MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+            preferences.edit().remove(AppSettings.MAPKIT_KEY)
+                    .remove(MAPKIT_PENDING).commit();
             mapRecoveryRequired = true;
             return false;
         }
 
-        String savedKey = preferences.getString(MAPKIT_KEY, "");
+        String savedKey = preferences.getString(AppSettings.MAPKIT_KEY, "");
         String embeddedKey = BuildConfig.MAPKIT_API_KEY == null
                 ? "" : BuildConfig.MAPKIT_API_KEY.trim();
         if ((savedKey == null || savedKey.trim().isEmpty()) && embeddedKey.isEmpty()) {
@@ -271,7 +258,8 @@ public final class MainActivity extends Activity {
         preferences.edit().putBoolean(MAPKIT_PENDING, true).commit();
         boolean initialized = GpsAntiRadarApplication.ensureMapKit(this);
         if (!initialized) {
-            preferences.edit().remove(MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+            preferences.edit().remove(AppSettings.MAPKIT_KEY)
+                    .remove(MAPKIT_PENDING).commit();
             mapRecoveryRequired = true;
         }
         return initialized;
@@ -301,7 +289,7 @@ public final class MainActivity extends Activity {
                 mapInitialized = false;
                 mapRecoveryRequired = true;
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .remove(MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+                        .remove(AppSettings.MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
             }
         }
         if (!mapInitialized) {
@@ -334,7 +322,8 @@ public final class MainActivity extends Activity {
         hudPanel.setGravity(Gravity.START);
         hudPanel.setPadding(dp(14), dp(10), dp(14), dp(12));
         applyHudTransparency(getSharedPreferences(SETTINGS, MODE_PRIVATE)
-                .getInt(HUD_TRANSPARENCY, 10));
+                .getInt(AppSettings.HUD_TRANSPARENCY,
+                        AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
         hudPanel.setElevation(dp(4));
         FrameLayout.LayoutParams hudParams = new FrameLayout.LayoutParams(dp(270), -2,
                 Gravity.BOTTOM | Gravity.START);
@@ -350,7 +339,7 @@ public final class MainActivity extends Activity {
         hudPanel.addView(unit);
         distanceView = text("—", 24, Color.rgb(30, 30, 30), Typeface.BOLD);
         hudPanel.addView(distanceView);
-        cameraView = text("Объектов впереди не найдено", 13, GREEN, Typeface.BOLD);
+        cameraView = text("Объектов впереди нет", 13, GREEN, Typeface.BOLD);
         cameraView.setGravity(Gravity.START);
         hudPanel.addView(cameraView);
         ImageButton menuButton = iconButton(ru.gpsantiradar.app.R.drawable.ic_menu, "Меню");
@@ -434,18 +423,25 @@ public final class MainActivity extends Activity {
         final TextView distanceLabel = text("", 15, Color.rgb(35, 35, 35), Typeface.NORMAL);
         distanceContent.addView(distanceLabel);
         SeekBar range = new SeekBar(this);
-        range.setMax(17);
-        int savedDistance = getSharedPreferences(SETTINGS, MODE_PRIVATE)
-                .getInt("alert_distance", 800);
-        range.setProgress(Math.max(0, Math.min(17, (savedDistance - 300) / 100)));
+        range.setMax((AppSettings.MAX_ALERT_DISTANCE_METERS
+                - AppSettings.MIN_ALERT_DISTANCE_METERS)
+                / AppSettings.ALERT_DISTANCE_STEP_METERS);
+        int savedDistance = AppSettings.clampAlertDistance(
+                getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
+                        AppSettings.ALERT_DISTANCE,
+                        AppSettings.DEFAULT_ALERT_DISTANCE_METERS));
+        range.setProgress((savedDistance - AppSettings.MIN_ALERT_DISTANCE_METERS)
+                / AppSettings.ALERT_DISTANCE_STEP_METERS);
         distanceLabel.setText("Расстояние оповещения: "
-                + (300 + range.getProgress() * 100) + " м");
+                + savedDistance + " м");
         range.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int distance = 300 + progress * 100;
+                int distance = AppSettings.clampAlertDistance(
+                        AppSettings.MIN_ALERT_DISTANCE_METERS
+                                + progress * AppSettings.ALERT_DISTANCE_STEP_METERS);
                 distanceLabel.setText("Расстояние оповещения: " + distance + " м");
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .putInt("alert_distance", distance).apply();
+                        .putInt(AppSettings.ALERT_DISTANCE, distance).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -511,18 +507,26 @@ public final class MainActivity extends Activity {
         final TextView transparencyLabel = text("", 15, Color.rgb(35, 35, 35), Typeface.NORMAL);
         transparencyContent.addView(transparencyLabel);
         SeekBar transparency = new SeekBar(this);
-        transparency.setMax(16);
-        int savedTransparency = getSharedPreferences(SETTINGS, MODE_PRIVATE)
-                .getInt(HUD_TRANSPARENCY, 10);
-        transparency.setProgress(Math.max(0, Math.min(16, savedTransparency / 5)));
+        transparency.setMax((AppSettings.MAX_HUD_TRANSPARENCY_PERCENT
+                - AppSettings.MIN_HUD_TRANSPARENCY_PERCENT)
+                / AppSettings.HUD_TRANSPARENCY_STEP_PERCENT);
+        int savedTransparency = AppSettings.clampHudTransparency(
+                getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
+                        AppSettings.HUD_TRANSPARENCY,
+                        AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
+        transparency.setProgress((savedTransparency
+                - AppSettings.MIN_HUD_TRANSPARENCY_PERCENT)
+                / AppSettings.HUD_TRANSPARENCY_STEP_PERCENT);
         transparencyLabel.setText("Прозрачность плашки: "
-                + (transparency.getProgress() * 5) + "%");
+                + savedTransparency + "%");
         transparency.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int value = progress * 5;
+                int value = AppSettings.clampHudTransparency(
+                        AppSettings.MIN_HUD_TRANSPARENCY_PERCENT
+                                + progress * AppSettings.HUD_TRANSPARENCY_STEP_PERCENT);
                 transparencyLabel.setText("Прозрачность плашки: " + value + "%");
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .putInt(HUD_TRANSPARENCY, value).apply();
+                        .putInt(AppSettings.HUD_TRANSPARENCY, value).apply();
                 applyHudTransparency(value);
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -790,7 +794,7 @@ public final class MainActivity extends Activity {
                     String value = input.getText().toString().trim();
                     if (value.isEmpty()) return;
                     getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                            .putString(MAPKIT_KEY, value)
+                            .putString(AppSettings.MAPKIT_KEY, value)
                             .remove(MAPKIT_PENDING)
                             .putBoolean(MAPKIT_SAFE_MIGRATION, true)
                             .commit();
@@ -1465,7 +1469,7 @@ public final class MainActivity extends Activity {
 
     private void applyHudTransparency(int transparencyPercent) {
         if (hudPanel == null) return;
-        int transparency = Math.max(0, Math.min(80, transparencyPercent));
+        int transparency = AppSettings.clampHudTransparency(transparencyPercent);
         int alpha = Math.round(255f * (100 - transparency) / 100f);
         hudPanel.setBackground(roundedBackground(Color.argb(alpha, 255, 255, 255), 14));
     }
@@ -1476,11 +1480,6 @@ public final class MainActivity extends Activity {
 
     private float dp(float value) {
         return value * getResources().getDisplayMetrics().density;
-    }
-
-    private String formatDistance(int meters) {
-        return meters >= 1000 ? String.format(Locale.US, "%.1f км", meters / 1000.0)
-                : meters + " м";
     }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {

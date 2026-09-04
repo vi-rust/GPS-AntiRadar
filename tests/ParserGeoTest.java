@@ -150,6 +150,26 @@ public final class ParserGeoTest {
         verifyMapMarkerEntityDiff();
 
         verifyMapMarkerPresentationEquality();
+        verifyDrivingSnapshotAndHud();
+        check(AppSettings.adjustAlertDistance(300, -1) == 300
+                        && AppSettings.adjustAlertDistance(300, 1) == 400
+                        && AppSettings.adjustAlertDistance(2000, 1) == 2000,
+                "alert distance uses 300..2000 with a 100 meter step");
+        check(AppSettings.adjustOverspeedThreshold(0, -1) == 0
+                        && AppSettings.adjustOverspeedThreshold(20, 1) == 20,
+                "overspeed threshold uses 0..20 with a 1 km/h step");
+        check(AppSettings.adjustHudTransparency(0, -1) == 0
+                        && AppSettings.adjustHudTransparency(75, 1) == 80
+                        && AppSettings.adjustHudTransparency(80, 1) == 80,
+                "HUD transparency uses 0..80 with a 5 percent step");
+        check(AppSettings.clampAlertDistance(299) == 300
+                        && AppSettings.clampAlertDistance(2300) == 2000
+                        && AppSettings.adjustAlertDistance(250, 1) == 400,
+                "alert distance is normalized before adjustment");
+        check(AppSettings.clampHudTransparency(-5) == 0
+                        && AppSettings.clampHudTransparency(95) == 80
+                        && AppSettings.adjustHudTransparency(90, -1) == 75,
+                "HUD transparency is normalized before adjustment");
         if (args.length > 0) {
             final int[] count = {0};
             RadarBaseParser.Result real;
@@ -163,6 +183,54 @@ public final class ParserGeoTest {
             System.out.println("Real file: " + real.count + " objects");
         }
         System.out.println("ParserGeoTest: OK");
+    }
+
+    private static void verifyDrivingSnapshotAndHud() {
+        check(java.lang.reflect.Modifier.isFinal(DrivingSnapshot.class.getModifiers()),
+                "driving snapshot type is immutable");
+        for (java.lang.reflect.Field field : DrivingSnapshot.class.getFields()) {
+            check(java.lang.reflect.Modifier.isFinal(field.getModifiers()),
+                    "driving snapshot field is immutable: " + field.getName());
+        }
+
+        DrivingSnapshot idle = DrivingSnapshot.idle();
+        check(!idle.hasLocation() && !idle.hasObject()
+                        && idle.cameraId == -1L && idle.distanceMeters == -1,
+                "idle driving snapshot has no location or object");
+        DrivingHudPresentation idleHud = DrivingHudPresentation.from(idle);
+        check(idleHud.speedText.equals("0") && idleHud.distanceText.equals("—")
+                        && idleHud.cameraText.equals("Объектов впереди нет")
+                        && idleHud.speedColor == DrivingHudPresentation.COLOR_GREEN
+                        && !idleHud.hasActiveObject,
+                "idle HUD uses the shared empty state");
+
+        DrivingSnapshot insideZone = new DrivingSnapshot(64.6f, 250, "Камера", 42L,
+                80, 800, 56.84, 60.61, "inside", "diagnostic");
+        check(insideZone.hasLocation() && insideZone.hasObject()
+                        && insideZone.cameraId == 42L
+                        && insideZone.alertState.equals("inside")
+                        && insideZone.alertAlgorithm.equals("diagnostic"),
+                "active driving snapshot preserves shared movement state");
+        DrivingHudPresentation insideHud = DrivingHudPresentation.from(insideZone);
+        check(insideHud.speedText.equals("65") && insideHud.distanceText.equals("250 м")
+                        && insideHud.cameraText.equals("Камера  ·  80 км/ч")
+                        && insideHud.speedColor == DrivingHudPresentation.COLOR_ALERT
+                        && insideHud.hasActiveObject
+                        && !insideHud.cameraText.contains("diagnostic"),
+                "inside-zone HUD formats the active object without diagnostics");
+
+        DrivingHudPresentation farHud = DrivingHudPresentation.from(new DrivingSnapshot(
+                70f, 1250, "Камера", 43L, 80, 800,
+                Double.NaN, Double.NaN, "", ""));
+        check(farHud.distanceText.equals("1.3 км")
+                        && farHud.speedColor == DrivingHudPresentation.COLOR_GREEN,
+                "HUD formats distances above one kilometer and inactive color");
+
+        DrivingHudPresentation overspeedHud = DrivingHudPresentation.from(
+                new DrivingSnapshot(81f, 250, "Камера", 44L, 80, 800,
+                        Double.NaN, Double.NaN, "", ""));
+        check(overspeedHud.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
+                "overspeed color takes priority inside the alert zone");
     }
 
     private static void check(boolean condition, String message) {

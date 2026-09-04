@@ -10,6 +10,8 @@ $database = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed
 $tracking = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\TrackingService.java")
 $activity = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\MainActivity.java")
 $application = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\GpsAntiRadarApplication.java")
+$snapshot = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java")
+$snapshotAdapter = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshotIntent.java")
 
 Assert-Contains $database 'setWriteAheadLoggingEnabled\(true\)' "CameraDatabase must enable WAL for concurrent readers"
 Assert-Contains $database 'beginTransactionNonExclusive\(\)' "RadarBase replacement must use a non-exclusive WAL transaction"
@@ -38,6 +40,29 @@ if ($update -lt 0 -or $accept -lt $update) {
 
 Assert-Contains $activity '\(north - south\) \* 0\.20' "latitude map-query padding must remain 20 percent"
 Assert-Contains $activity '\(east - west\) \* 0\.20' "longitude map-query padding must remain 20 percent"
+
+$drivingReceiverStart = $activity.IndexOf("private final BroadcastReceiver receiver")
+$drivingReceiverEnd = $activity.IndexOf("private final BroadcastReceiver radarBaseReceiver",
+        $drivingReceiverStart)
+$drivingReceiver = if ($drivingReceiverStart -ge 0 -and
+        $drivingReceiverEnd -gt $drivingReceiverStart) {
+    $activity.Substring($drivingReceiverStart, $drivingReceiverEnd - $drivingReceiverStart)
+} else { "" }
+Assert-Contains $drivingReceiver 'DrivingSnapshotIntent\.from\(intent\)' "MainActivity must parse each driving update through DrivingSnapshotIntent"
+if ($drivingReceiver -match 'get(?:Float|Int|Long|Double|String)Extra\(TrackingService\.EXTRA_') {
+    throw "MainActivity must not duplicate TrackingService extra parsing"
+}
+if ($snapshot -match '\b(?:import\s+)?android\.') {
+    throw "DrivingSnapshot must remain independent from Android"
+}
+foreach ($extra in @("EXTRA_SPEED", "EXTRA_DISTANCE", "EXTRA_CAMERA", "EXTRA_CAMERA_ID",
+        "EXTRA_LIMIT", "EXTRA_ALERT_DISTANCE", "EXTRA_LATITUDE", "EXTRA_LONGITUDE",
+        "EXTRA_ALERT_STATE", "EXTRA_ALERT_ALGORITHM")) {
+    Assert-Contains $snapshotAdapter ([regex]::Escape("TrackingService.$extra")) "DrivingSnapshotIntent must read $extra"
+}
+if ([regex]::Matches($tracking, 'putExtra\(EXTRA_CAMERA_ID').Count -ne 2) {
+    throw "TrackingService must include camera id in both update broadcasts"
+}
 
 if ($activity -match 'databaseView') {
     throw "database information must not remain in the speed HUD"
