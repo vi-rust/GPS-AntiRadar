@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -20,6 +21,7 @@ import com.yandex.mapkit.map.MapWindow;
 import com.yandex.mapkit.mapview.MapView;
 
 public final class CarMapPresentation {
+    private static final String TAG = "CarMapPresentation";
     private static final int GREEN = Color.rgb(0, 166, 82);
 
     private final Context context;
@@ -48,11 +50,6 @@ public final class CarMapPresentation {
         this.carContext = carContext;
         root = new FrameLayout(context);
         root.setBackgroundColor(Color.BLACK);
-
-        mapView = new MapView(context);
-        root.addView(mapView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
 
         hudPanel = new LinearLayout(context);
         hudPanel.setOrientation(LinearLayout.VERTICAL);
@@ -87,9 +84,25 @@ public final class CarMapPresentation {
         hintParams.setMargins(0, dp(8), 0, 0);
         root.addView(hintView, hintParams);
 
-        startMap();
         refreshHudTransparency();
         onCarConfigurationChanged();
+    }
+
+    public void start() {
+        if (destroyed) {
+            throw new IllegalStateException("Car map presentation is destroyed");
+        }
+        if (mapView != null) return;
+        try {
+            mapView = new MapView(context);
+            root.addView(mapView, 0, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            startMap();
+        } catch (RuntimeException | LinkageError error) {
+            destroy();
+            throw error;
+        }
     }
 
     public View rootView() {
@@ -142,14 +155,14 @@ public final class CarMapPresentation {
     }
 
     public void onStableAreaChanged(Rect area) {
-        if (destroyed || area == null) return;
+        if (destroyed || area == null || area.isEmpty()) return;
         stableArea = new Rect(area);
         applyStableArea();
         root.post(this::applyStableArea);
     }
 
     public void onVisibleAreaChanged(Rect area) {
-        if (destroyed || area == null) return;
+        if (destroyed || area == null || area.isEmpty()) return;
         visibleArea = new Rect(area);
         applyVisibleArea();
         root.post(this::applyVisibleArea);
@@ -182,29 +195,45 @@ public final class CarMapPresentation {
         if (destroyed) return;
         destroyed = true;
         if (mapLayer != null) {
-            mapLayer.destroy();
+            try {
+                mapLayer.destroy();
+            } catch (RuntimeException | LinkageError error) {
+                Log.e(TAG, "Failed to destroy shared camera layer", error);
+            }
             mapLayer = null;
         }
         gestureController = null;
         if (mapStarted && mapView != null) {
-            mapView.onStop();
+            try {
+                mapView.onStop();
+            } catch (RuntimeException | LinkageError error) {
+                Log.e(TAG, "Failed to stop car MapView", error);
+            }
             mapStarted = false;
         }
         if (mapView != null) {
-            mapView.destroy();
+            try {
+                mapView.destroy();
+            } catch (RuntimeException | LinkageError error) {
+                Log.e(TAG, "Failed to destroy car MapView", error);
+            }
             mapView = null;
         }
         if (mapKitAcquired) {
-            application.releaseMapKit();
+            try {
+                application.releaseMapKit();
+            } catch (RuntimeException | LinkageError error) {
+                Log.e(TAG, "Failed to release MapKit", error);
+            }
             mapKitAcquired = false;
         }
     }
 
     private void startMap() {
-        application.acquireMapKit();
         mapKitAcquired = true;
-        mapView.onStart();
+        application.acquireMapKit();
         mapStarted = true;
+        mapView.onStart();
         final MapWindow mapWindow = mapView.getMapWindow();
         mapLayer = new SharedCameraMapLayer(context, mapWindow,
                 new SharedCameraMapLayer.Host() {
@@ -231,7 +260,7 @@ public final class CarMapPresentation {
     }
 
     private void applyStableArea() {
-        if (destroyed || stableArea == null) return;
+        if (destroyed || stableArea == null || stableArea.isEmpty()) return;
         Rect area = stableArea;
         FrameLayout.LayoutParams params =
                 (FrameLayout.LayoutParams) hudPanel.getLayoutParams();
@@ -245,7 +274,8 @@ public final class CarMapPresentation {
     }
 
     private void applyVisibleArea() {
-        if (destroyed || visibleArea == null || mapView == null) return;
+        if (destroyed || visibleArea == null || visibleArea.isEmpty()
+                || mapView == null) return;
         MapWindow mapWindow = mapView.getMapWindow();
         int width = mapWindow.width();
         int height = mapWindow.height();

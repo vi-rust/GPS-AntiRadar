@@ -4,6 +4,7 @@ import android.app.Presentation;
 import android.graphics.Rect;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.util.Log;
 import android.view.Surface;
 
 import androidx.car.app.AppManager;
@@ -11,9 +12,27 @@ import androidx.car.app.CarContext;
 import androidx.car.app.SurfaceCallback;
 import androidx.car.app.SurfaceContainer;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
 public final class CarSurfaceController implements SurfaceCallback {
+    private static final String TAG = "CarSurfaceController";
+    private static final String SURFACE_ERROR =
+            "Не удалось отобразить карту. Переподключите Android Auto.";
+
     interface SurfaceFactory {
         SurfaceResource create(CarSurfaceSpec spec, Surface surface);
+    }
+
+    interface SurfaceReleaser {
+        void release(Surface surface);
+    }
+
+    interface FailureListener {
+        void onSurfaceFailure(String message);
     }
 
     interface SurfaceResource {
@@ -33,9 +52,14 @@ public final class CarSurfaceController implements SurfaceCallback {
 
     private final AppManager appManager;
     private final SurfaceFactory surfaceFactory;
+    private final SurfaceReleaser surfaceReleaser;
+    private final FailureListener failureListener;
+    private final Set<Surface> releasedSurfaces =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<Surface, Long> surfaceTokens = new IdentityHashMap<>();
     private SurfaceResource surfaceResource;
-    private Surface activeSurface;
-    private CarSurfaceSpec activeSpec;
+    private SurfaceLease activeLease;
+    private long nextSurfaceToken;
     private DrivingSnapshot latestSnapshot = DrivingSnapshot.idle();
     private Rect stableArea;
     private Rect visibleArea;
@@ -45,16 +69,39 @@ public final class CarSurfaceController implements SurfaceCallback {
     public CarSurfaceController(CarContext carContext,
             GpsAntiRadarApplication application) {
         this(carContext, application,
-                new AndroidSurfaceFactory(carContext, application));
+                new AndroidSurfaceFactory(carContext, application),
+                Surface::release, message -> {});
+    }
+
+    public CarSurfaceController(CarContext carContext,
+            GpsAntiRadarApplication application, FailureListener failureListener) {
+        this(carContext, application,
+                new AndroidSurfaceFactory(carContext, application),
+                Surface::release, failureListener);
     }
 
     CarSurfaceController(CarContext carContext,
             GpsAntiRadarApplication application, SurfaceFactory surfaceFactory) {
+        this(carContext, application, surfaceFactory,
+                Surface::release, message -> {});
+    }
+
+    CarSurfaceController(CarContext carContext,
+            GpsAntiRadarApplication application, SurfaceFactory surfaceFactory,
+            SurfaceReleaser surfaceReleaser, FailureListener failureListener) {
         if (carContext == null) throw new IllegalArgumentException("carContext is required");
         if (surfaceFactory == null) {
             throw new IllegalArgumentException("surfaceFactory is required");
         }
+        if (surfaceReleaser == null) {
+            throw new IllegalArgumentException("surfaceReleaser is required");
+        }
+        if (failureListener == null) {
+            throw new IllegalArgumentException("failureListener is required");
+        }
         this.surfaceFactory = surfaceFactory;
+        this.surfaceReleaser = surfaceReleaser;
+        this.failureListener = failureListener;
         appManager = carContext.getCarService(AppManager.class);
         appManager.setSurfaceCallback(this);
     }
@@ -68,17 +115,31 @@ public final class CarSurfaceController implements SurfaceCallback {
                 surfaceContainer.getDpi());
         Surface surface = surfaceContainer.getSurface();
         releaseSurface();
-        if (destroyed || !spec.isUsable()) return;
-        SurfaceResource created = surfaceFactory.create(spec, surface);
-        if (created == null) return;
-        surfaceResource = created;
-        activeSurface = surface;
-        activeSpec = spec;
-        created.onCarConfigurationChanged();
-        if (stableArea != null) created.onStableAreaChanged(new Rect(stableArea));
-        if (visibleArea != null) created.onVisibleAreaChanged(new Rect(visibleArea));
-        created.setPanMode(panMode);
-        created.onDrivingSnapshot(latestSnapshot);
+        SurfaceLease incoming = newSurfaceLease(surface, spec);
+        if (destroyed || !spec.isUsable()) {
+            releaseSurfaceObject(surface);
+            return;
+        }
+        try {
+            SurfaceResource created = surfaceFactory.create(spec, surface);
+            if (created == null) {
+                throw new IllegalStateException("Surface factory returned no resource");
+            }
+            surfaceResource = created;
+            activeLease = incoming;
+            created.onCarConfigurationChanged();
+            if (stableArea != null) created.onStableAreaChanged(new Rect(stableArea));
+            if (visibleArea != null) created.onVisibleAreaChanged(new Rect(visibleArea));
+            created.setPanMode(panMode);
+            created.onDrivingSnapshot(latestSnapshot);
+        } catch (RuntimeException | LinkageError error) {
+            if (activeLease == incoming) {
+                releaseSurface();
+            } else {
+                releaseSurfaceObject(surface);
+            }
+            notifySurfaceFailure(error);
+        }
     }
 
     @Override public synchronized void onSurfaceDestroyed(
@@ -88,22 +149,28 @@ public final class CarSurfaceController implements SurfaceCallback {
                 surfaceContainer.getWidth(),
                 surfaceContainer.getHeight(),
                 surfaceContainer.getDpi());
-        if (surfaceContainer.getSurface() == activeSurface
-                && destroyedSpec.equals(activeSpec)) {
+        Surface surface = surfaceContainer.getSurface();
+        Long token = surface == null ? null : surfaceTokens.get(surface);
+        if (activeLease != null
+                && activeLease.matches(surface, destroyedSpec, token)) {
             releaseSurface();
+        } else {
+            releaseSurfaceObject(surface);
         }
     }
 
     @Override public synchronized void onStableAreaChanged(Rect area) {
-        stableArea = area == null ? null : new Rect(area);
-        if (surfaceResource != null && stableArea != null) {
+        if (area == null || area.isEmpty()) return;
+        stableArea = new Rect(area);
+        if (surfaceResource != null) {
             surfaceResource.onStableAreaChanged(new Rect(stableArea));
         }
     }
 
     @Override public synchronized void onVisibleAreaChanged(Rect area) {
-        visibleArea = area == null ? null : new Rect(area);
-        if (surfaceResource != null && visibleArea != null) {
+        if (area == null || area.isEmpty()) return;
+        visibleArea = new Rect(area);
+        if (surfaceResource != null) {
             surfaceResource.onVisibleAreaChanged(new Rect(visibleArea));
         }
     }
@@ -180,10 +247,63 @@ public final class CarSurfaceController implements SurfaceCallback {
 
     private void releaseSurface() {
         SurfaceResource existing = surfaceResource;
+        SurfaceLease lease = activeLease;
         surfaceResource = null;
-        activeSurface = null;
-        activeSpec = null;
-        if (existing != null) existing.release();
+        activeLease = null;
+        try {
+            if (existing != null) existing.release();
+        } catch (RuntimeException | LinkageError error) {
+            Log.e(TAG, "Failed to release car surface content", error);
+        } finally {
+            if (lease != null) releaseSurfaceObject(lease.surface);
+        }
+    }
+
+    private SurfaceLease newSurfaceLease(Surface surface, CarSurfaceSpec spec) {
+        long token = ++nextSurfaceToken;
+        if (surface != null) surfaceTokens.put(surface, token);
+        return new SurfaceLease(token, surface, spec);
+    }
+
+    private void releaseSurfaceObject(Surface surface) {
+        if (surface == null || !releasedSurfaces.add(surface)) return;
+        surfaceTokens.remove(surface);
+        try {
+            surfaceReleaser.release(surface);
+        } catch (RuntimeException | LinkageError error) {
+            Log.e(TAG, "Failed to release host surface", error);
+        }
+    }
+
+    private void notifySurfaceFailure(Throwable error) {
+        Log.e(TAG, "Unable to create car map surface", error);
+        try {
+            failureListener.onSurfaceFailure(SURFACE_ERROR);
+        } catch (RuntimeException callbackError) {
+            Log.e(TAG, "Unable to report car map surface failure", callbackError);
+        }
+    }
+
+    private static final class SurfaceLease {
+        final long token;
+        final Surface surface;
+        final CarSurfaceSpec spec;
+
+        SurfaceLease(long token, Surface surface, CarSurfaceSpec spec) {
+            this.token = token;
+            this.surface = surface;
+            this.spec = spec;
+        }
+
+        boolean matches(Surface candidate, CarSurfaceSpec candidateSpec,
+                Long candidateToken) {
+            boolean sameGeneration = surface == null
+                    ? candidate == null
+                    : candidateToken != null && candidateToken == token;
+            return sameGeneration
+                    && Objects.equals(surface, candidate)
+                    && spec.equals(candidateSpec);
+        }
     }
 
     private static final class AndroidSurfaceFactory implements SurfaceFactory {
@@ -220,21 +340,21 @@ public final class CarSurfaceController implements SurfaceCallback {
             if (displayManager == null) {
                 throw new IllegalStateException("DisplayManager is unavailable");
             }
-            virtualDisplay = displayManager.createVirtualDisplay(
-                    "gps-antiradar-car-map",
-                    spec.width, spec.height, spec.dpi, surface, 0);
-            if (virtualDisplay == null || virtualDisplay.getDisplay() == null) {
-                if (virtualDisplay != null) virtualDisplay.release();
-                virtualDisplay = null;
-                throw new IllegalStateException("Unable to create car map display");
-            }
-            presentation = new Presentation(carContext, virtualDisplay.getDisplay());
             try {
+                virtualDisplay = displayManager.createVirtualDisplay(
+                        "gps-antiradar-car-map",
+                        spec.width, spec.height, spec.dpi, surface, 0);
+                if (virtualDisplay == null || virtualDisplay.getDisplay() == null) {
+                    throw new IllegalStateException("Unable to create car map display");
+                }
+                presentation = new Presentation(
+                        carContext, virtualDisplay.getDisplay());
                 content = new CarMapPresentation(
                         presentation.getContext(), application, carContext);
+                content.start();
                 presentation.setContentView(content.rootView());
                 presentation.show();
-            } catch (RuntimeException | Error error) {
+            } catch (RuntimeException | LinkageError error) {
                 release();
                 throw error;
             }
@@ -293,15 +413,27 @@ public final class CarSurfaceController implements SurfaceCallback {
             if (released) return;
             released = true;
             if (content != null) {
-                content.destroy();
+                try {
+                    content.destroy();
+                } catch (RuntimeException | LinkageError error) {
+                    Log.e(TAG, "Failed to destroy car map content", error);
+                }
                 content = null;
             }
             if (presentation != null) {
-                presentation.dismiss();
+                try {
+                    presentation.dismiss();
+                } catch (RuntimeException | LinkageError error) {
+                    Log.e(TAG, "Failed to dismiss car presentation", error);
+                }
                 presentation = null;
             }
             if (virtualDisplay != null) {
-                virtualDisplay.release();
+                try {
+                    virtualDisplay.release();
+                } catch (RuntimeException | LinkageError error) {
+                    Log.e(TAG, "Failed to release car virtual display", error);
+                }
                 virtualDisplay = null;
             }
         }

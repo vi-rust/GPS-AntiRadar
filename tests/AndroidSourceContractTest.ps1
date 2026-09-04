@@ -227,6 +227,7 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
+Assert-Contains $buildGradle 'androidComponents\s*\{[\s\S]*beforeVariants\(selector\(\)\.withBuildType\("release"\)\)[\s\S]*enableUnitTest\s*=\s*true' "AGP must create a real release unit-test variant"
 foreach ($dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },
@@ -312,11 +313,13 @@ $surfaceController = Get-Content -Raw -Encoding UTF8 (
         Join-Path $carSourceRoot "CarSurfaceController.java")
 $carPresentation = Get-Content -Raw -Encoding UTF8 (
         Join-Path $carSourceRoot "CarMapPresentation.java")
+$carSetupScreen = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $carSourceRoot "CarSetupScreen.java")
 $carMapScreen = Get-Content -Raw -Encoding UTF8 (Join-Path $carSourceRoot "CarMapScreen.java")
 $carGestures = Get-Content -Raw -Encoding UTF8 (
         Join-Path $carSourceRoot "CarMapGestureController.java")
 
-Assert-Contains $carService 'new HostValidator\.Builder\(this\)\.build\(\)' "Car service must validate system and permission-bearing hosts"
+Assert-Contains $carService 'addAllowedHosts\(androidx\.car\.app\.R\.array\.hosts_allowlist_sample\)' "Car service must load the official projected-host allowlist"
 Assert-Contains $carService 'new GpsCarSession\(\)' "Car service must create GpsCarSession"
 Assert-Contains $carSession 'ACCESS_FINE_LOCATION' "Car session must require fine location"
 Assert-Contains $carSession 'ensureMapKit' "Car session must require a ready MapKit"
@@ -326,12 +329,26 @@ if ($carSession -match 'new\s+RadarBaseUpdater|new\s+StrelkaAlertTracker') {
 }
 Assert-Contains $carSession 'DrivingSnapshotIntent\.from' "Car session must decode shared tracking snapshots"
 Assert-Contains $carSession 'unregisterReceiver' "Car session must unregister its update receiver"
+Assert-Contains $carSession 'getCarService\(ScreenManager\.class\)\.push\(' "surface failures must open a setup MessageTemplate"
+Assert-Contains $carSession 'new CarSetupScreen\(getCarContext\(\),\s*true,\s*true,\s*message\)' "surface failure details must reach CarSetupScreen"
+Assert-Contains $carSetupScreen 'surfaceError' "CarSetupScreen must render surface initialization errors"
 if ($carSession -match 'stopService') {
     throw "Car session destruction must not stop the shared TrackingService"
 }
 Assert-Contains $surfaceController 'implements SurfaceCallback' "Car controller must implement SurfaceCallback"
 Assert-Contains $surfaceController 'setSurfaceCallback\(this\)' "Car controller must register its surface callback"
 Assert-Contains $surfaceController 'setSurfaceCallback\(null\)' "Car controller destroy must clear its callback"
+Assert-Contains $surfaceController 'Surface::release' "production must release every host Surface"
+Assert-Contains $surfaceController 'IdentityHashMap' "surface ownership must use identity-safe tokens"
+Assert-Contains $surfaceController 'Objects\.equals\(surface,\s*candidate\)' "surface destruction must use safe equality"
+if ($surfaceController -match 'getSurface\(\)\s*==') {
+    throw "surface destruction must not rely only on reference equality"
+}
+Assert-Contains $surfaceController 'catch \(RuntimeException \| LinkageError error\)' "surface creation failures must be contained"
+Assert-Contains $surfaceController 'notifySurfaceFailure\(error\)' "surface creation failures must notify the session"
+if ([regex]::Matches($surfaceController, 'area == null \|\| area\.isEmpty\(\)').Count -lt 2) {
+    throw "empty stable and visible rectangles must remain unknown"
+}
 $releaseIndex = $surfaceController.IndexOf("releaseSurface()")
 $createIndex = $surfaceController.IndexOf("surfaceFactory.create", $releaseIndex)
 if ($releaseIndex -lt 0 -or $createIndex -lt $releaseIndex) {
@@ -341,6 +358,24 @@ Assert-Contains $surfaceController 'createVirtualDisplay' "Car surface must crea
 Assert-Contains $surfaceController 'new Presentation' "Car surface must use Presentation"
 Assert-Contains $surfaceController 'presentation\.dismiss\(\)' "Car Presentation must be dismissed"
 Assert-Contains $surfaceController 'virtualDisplay\.release\(\)' "Car VirtualDisplay must be released"
+$contentConstruction = $surfaceController.IndexOf("content = new CarMapPresentation")
+$contentStart = $surfaceController.IndexOf("content.start()", $contentConstruction)
+$contentAttach = $surfaceController.IndexOf(
+        "presentation.setContentView(content.rootView())", $contentStart)
+if ($contentConstruction -lt 0 -or $contentStart -lt $contentConstruction -or
+        $contentAttach -lt $contentStart) {
+    throw "CarMapPresentation must be assigned before native start and view attachment"
+}
+$presentationConstructor = $carPresentation.IndexOf("public CarMapPresentation(")
+$presentationStart = $carPresentation.IndexOf("public void start()", $presentationConstructor)
+$constructorBody = if ($presentationConstructor -ge 0 -and
+        $presentationStart -gt $presentationConstructor) {
+    $carPresentation.Substring(
+            $presentationConstructor, $presentationStart - $presentationConstructor)
+} else { "" }
+if ($constructorBody -match 'new MapView|startMap\(') {
+    throw "CarMapPresentation construction must not start native MapKit resources"
+}
 Assert-Contains $carPresentation 'new SharedCameraMapLayer' "Car presentation must use the shared camera layer"
 Assert-Contains $carPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
 if ($carPresentation -match 'alertAlgorithm') {
@@ -348,6 +383,9 @@ if ($carPresentation -match 'alertAlgorithm') {
 }
 Assert-Contains $carPresentation 'onStableAreaChanged' "Car HUD must respond to stable-area changes"
 Assert-Contains $carPresentation 'onVisibleAreaChanged' "Car map must respond to visible-area changes"
+if ([regex]::Matches($carPresentation, 'area == null \|\| area\.isEmpty\(\)').Count -lt 2) {
+    throw "Car presentation must ignore empty safe-area rectangles"
+}
 Assert-Contains $carPresentation 'isDarkMode' "Car HUD must follow car dark mode"
 Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
 Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"

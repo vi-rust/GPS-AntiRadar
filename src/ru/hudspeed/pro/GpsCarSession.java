@@ -11,6 +11,7 @@ import android.content.res.Configuration;
 import android.os.Build;
 
 import androidx.car.app.Screen;
+import androidx.car.app.ScreenManager;
 import androidx.car.app.Session;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.DefaultLifecycleObserver;
@@ -20,6 +21,7 @@ public final class GpsCarSession extends Session {
     private CarSurfaceController surfaceController;
     private BroadcastReceiver updateReceiver;
     private boolean receiverRegistered;
+    private boolean surfaceFailureShown;
 
     public GpsCarSession() {
         getLifecycle().addObserver(new DefaultLifecycleObserver() {
@@ -31,6 +33,7 @@ public final class GpsCarSession extends Session {
 
     @Override public Screen onCreateScreen(Intent intent) {
         Context context = getCarContext();
+        surfaceFailureShown = false;
         boolean locationGranted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED;
@@ -43,11 +46,19 @@ public final class GpsCarSession extends Session {
         destroyCarResources();
         GpsAntiRadarApplication application =
                 (GpsAntiRadarApplication) context.getApplicationContext();
-        surfaceController = new CarSurfaceController(getCarContext(), application);
+        surfaceController = new CarSurfaceController(
+                getCarContext(), application, this::showSurfaceFailure);
         registerTrackingReceiver();
         context.startForegroundService(new Intent(context, TrackingService.class)
                 .setAction(TrackingService.ACTION_START));
         return new CarMapScreen(getCarContext(), surfaceController);
+    }
+
+    private void showSurfaceFailure(String message) {
+        if (surfaceFailureShown) return;
+        surfaceFailureShown = true;
+        getCarContext().getCarService(ScreenManager.class).push(
+                new CarSetupScreen(getCarContext(), true, true, message));
     }
 
     @Override public void onCarConfigurationChanged(Configuration newConfiguration) {

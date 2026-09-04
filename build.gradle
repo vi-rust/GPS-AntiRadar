@@ -70,6 +70,12 @@ android {
     }
 }
 
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variantBuilder ->
+        variantBuilder.enableUnitTest = true
+    }
+}
+
 base {
     archivesName = 'GPS-AntiRadar'
 }

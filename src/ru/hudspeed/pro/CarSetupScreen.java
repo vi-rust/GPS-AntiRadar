@@ -9,12 +9,19 @@ import androidx.car.app.model.Template;
 public final class CarSetupScreen extends Screen {
     private final boolean locationGranted;
     private final boolean mapKitReady;
+    private final String surfaceError;
 
     public CarSetupScreen(CarContext carContext, boolean locationGranted,
             boolean mapKitReady) {
+        this(carContext, locationGranted, mapKitReady, null);
+    }
+
+    public CarSetupScreen(CarContext carContext, boolean locationGranted,
+            boolean mapKitReady, String surfaceError) {
         super(carContext);
         this.locationGranted = locationGranted;
         this.mapKitReady = mapKitReady;
+        this.surfaceError = surfaceError;
     }
 
     @Override public Template onGetTemplate() {
@@ -26,6 +33,10 @@ public final class CarSetupScreen extends Screen {
             if (message.length() > 0) message.append("\n\n");
             message.append("Укажите ключ Yandex MapKit в приложении на телефоне, "
                     + "затем переподключите Android Auto.");
+        }
+        if (surfaceError != null && !surfaceError.trim().isEmpty()) {
+            if (message.length() > 0) message.append("\n\n");
+            message.append(surfaceError);
         }
         return new MessageTemplate.Builder(message)
                 .setTitle("Настройка GPS AntiRadar")
