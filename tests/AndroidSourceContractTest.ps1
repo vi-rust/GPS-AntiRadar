@@ -6,6 +6,15 @@ function Assert-Contains([string]$Text, [string]$Pattern, [string]$Message) {
     if ($Text -notmatch $Pattern) { throw $Message }
 }
 
+function Test-ActiveGradleDependency(
+        [string]$Gradle,
+        [string]$Configuration,
+        [string]$Coordinate) {
+    $activeLinePattern = "(?m)^[ \t]*" + [regex]::Escape($Configuration) +
+            "[ \t]+'" + [regex]::Escape($Coordinate) + "'[ \t]*\r?$"
+    return $Gradle -cmatch $activeLinePattern
+}
+
 $database = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\CameraDatabase.java")
 $tracking = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\TrackingService.java")
 $activity = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "src\ru\hudspeed\pro\MainActivity.java")
@@ -214,13 +223,23 @@ Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
 foreach ($dependency in @(
-        "implementation 'androidx.car.app:app:1.7.0'",
-        "implementation 'androidx.car.app:app-projected:1.7.0'",
-        "testImplementation 'androidx.car.app:app-testing:1.7.0'",
-        "testImplementation 'androidx.test:core:1.6.1'",
-        "testImplementation 'junit:junit:4.13.2'",
-        "testImplementation 'org.robolectric:robolectric:4.16.1'")) {
-    Assert-Contains -Text $buildGradle -Pattern ([regex]::Escape($dependency)) -Message "Android Auto dependency is missing: $dependency"
+        [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
+        [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },
+        [pscustomobject]@{ Configuration = "testImplementation"; Coordinate = "androidx.car.app:app-testing:1.7.0" },
+        [pscustomobject]@{ Configuration = "testImplementation"; Coordinate = "androidx.test:core:1.6.1" },
+        [pscustomobject]@{ Configuration = "testImplementation"; Coordinate = "junit:junit:4.13.2" },
+        [pscustomobject]@{ Configuration = "testImplementation"; Coordinate = "org.robolectric:robolectric:4.16.1" })) {
+    if (-not (Test-ActiveGradleDependency $buildGradle $dependency.Configuration $dependency.Coordinate)) {
+        throw "Android Auto dependency is missing: $($dependency.Configuration) '$($dependency.Coordinate)'"
+    }
+}
+$inactiveAndroidAutoDependency = "// implementation 'androidx.car.app:app:1.7.0'"
+if (Test-ActiveGradleDependency $inactiveAndroidAutoDependency "implementation" "androidx.car.app:app:1.7.0") {
+    throw "commented Android Auto dependencies must not satisfy the active dependency contract"
+}
+$wrongScopeAndroidAutoDependency = "testImplementation 'androidx.car.app:app:1.7.0'"
+if (Test-ActiveGradleDependency $wrongScopeAndroidAutoDependency "implementation" "androidx.car.app:app:1.7.0") {
+    throw "Android Auto dependencies must use their required Gradle configuration"
 }
 
 $automotiveDescriptorPath = Join-Path $Project "res\xml\automotive_app_desc.xml"
