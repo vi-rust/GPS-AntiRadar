@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -134,6 +135,7 @@ public final class ParserGeoTest {
         verifyProcessLaunchGuard();
         verifyCameraMarkerDiff();
         verifyStableMapMarkerLayout();
+        verifyMapMarkerEntityDiff();
 
         verifyMapMarkerPresentationEquality();
         if (args.length > 0) {
@@ -340,6 +342,51 @@ public final class ParserGeoTest {
         check(!baseline.samePresentation(individualEntity(changed)), "speed rules change presentation");
     }
 
+    private static void verifyMapMarkerEntityDiff() {
+        List<CameraPoint> initialPoints = java.util.Arrays.asList(
+                marker(401, 55.75000, 37.61000, 1),
+                marker(402, 55.75005, 37.61005, 2),
+                marker(403, 56.83000, 60.60000, 1),
+                marker(404, 56.83005, 60.60005, 2));
+        Map<String, MapMarkerLayout.Entity> rendered = entitiesByKey(
+                MapMarkerLayout.create(initialPoints, 10.4f));
+        String yekaterinburgKey = entityKeyContaining(rendered, 403L);
+        List<CameraPoint> changedPoints = new ArrayList<>(initialPoints);
+        changedPoints.add(marker(405, 55.75003, 37.61003, 3));
+        MapMarkerEntityDiff.Result diff = MapMarkerEntityDiff.between(rendered,
+                MapMarkerLayout.create(changedPoints, 10.4f));
+        check(diff.removeKeys.isEmpty() && diff.add.isEmpty() && diff.update.size() == 1,
+                "new member updates only its existing cluster");
+        check(diff.update.get(0).memberIds.contains(405L),
+                "updated cluster contains the entering camera");
+        check(!diff.update.get(0).key.equals(yekaterinburgKey),
+                "Yekaterinburg cluster remains unchanged");
+
+        rendered = entitiesByKey(MapMarkerLayout.create(initialPoints, 14f));
+        changedPoints = new ArrayList<>(initialPoints);
+        changedPoints.set(0, marker(401, 55.75010, 37.61000, 1));
+        diff = MapMarkerEntityDiff.between(rendered,
+                MapMarkerLayout.create(changedPoints, 14f));
+        check(diff.removeKeys.isEmpty() && diff.add.isEmpty() && diff.update.size() == 1,
+                "moving an individual camera updates its stable entity");
+        check(diff.update.get(0).key.equals("camera:401"),
+                "moved camera preserves its individual key");
+    }
+
+    private static Map<String, MapMarkerLayout.Entity> entitiesByKey(
+            List<MapMarkerLayout.Entity> entities) {
+        Map<String, MapMarkerLayout.Entity> byKey = new LinkedHashMap<>();
+        for (MapMarkerLayout.Entity entity : entities) byKey.put(entity.key, entity);
+        return byKey;
+    }
+
+    private static String entityKeyContaining(Map<String, MapMarkerLayout.Entity> entities,
+                                              long memberId) {
+        for (MapMarkerLayout.Entity entity : entities.values()) {
+            if (entity.memberIds.contains(memberId)) return entity.key;
+        }
+        throw new AssertionError("missing member " + memberId);
+    }
     private static MapMarkerLayout.Entity individualEntity(CameraPoint camera) {
         return MapMarkerLayout.create(Collections.singletonList(camera), 14f).get(0);
     }
