@@ -15,13 +15,6 @@ import androidx.core.graphics.drawable.IconCompat;
 
 public final class CarValueScreen extends Screen {
     public enum Setting {
-        ALERT_DISTANCE(
-                AppSettings.ALERT_DISTANCE,
-                "Расстояние оповещения",
-                AppSettings.DEFAULT_ALERT_DISTANCE_METERS,
-                AppSettings.MIN_ALERT_DISTANCE_METERS,
-                AppSettings.MAX_ALERT_DISTANCE_METERS,
-                AppSettings.ALERT_DISTANCE_STEP_METERS),
         OVERSPEED_THRESHOLD(
                 AppSettings.OVERSPEED_THRESHOLD,
                 "Предел превышения скорости",
@@ -80,8 +73,6 @@ public final class CarValueScreen extends Screen {
 
         public int normalize(int value) {
             switch (this) {
-                case ALERT_DISTANCE:
-                    return AppSettings.clampAlertDistance(value);
                 case OVERSPEED_THRESHOLD:
                     return AppSettings.clampOverspeedThreshold(value);
                 case HUD_TRANSPARENCY:
@@ -93,8 +84,6 @@ public final class CarValueScreen extends Screen {
 
         public int adjust(int value, int direction) {
             switch (this) {
-                case ALERT_DISTANCE:
-                    return AppSettings.adjustAlertDistance(value, direction);
                 case OVERSPEED_THRESHOLD:
                     return AppSettings.adjustOverspeedThreshold(value, direction);
                 case HUD_TRANSPARENCY:
@@ -107,8 +96,6 @@ public final class CarValueScreen extends Screen {
         public String format(int value) {
             int normalized = normalize(value);
             switch (this) {
-                case ALERT_DISTANCE:
-                    return normalized + " м";
                 case OVERSPEED_THRESHOLD:
                     return normalized + " км/ч";
                 case HUD_TRANSPARENCY:

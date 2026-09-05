@@ -13,15 +13,15 @@ public final class StrelkaAlertAlgorithm {
 
     private StrelkaAlertAlgorithm() {}
 
-    public static int activationDistance(CameraPoint object, int fallbackMeters) {
-        int configured = object.distanceMeters > 0 ? object.distanceMeters : fallbackMeters;
-        return Math.max(50, Math.min(SEARCH_RADIUS_METERS, configured));
+    public static int activationDistance(CameraPoint object) {
+        if (object == null || object.distanceMeters <= 0) return 0;
+        return Math.max(50, Math.min(SEARCH_RADIUS_METERS, object.distanceMeters));
     }
 
     public static boolean matchesZone(CameraPoint object, double distanceMeters,
-                                      float vehicleHeading, float bearingToObject,
-                                      int fallbackMeters) {
-        int forwardDistance = activationDistance(object, fallbackMeters);
+                                      float vehicleHeading, float bearingToObject) {
+        int forwardDistance = activationDistance(object);
+        if (forwardDistance == 0) return false;
         if (object.dirType == 0) {
             return distanceMeters < forwardDistance * ZONE_MARGIN;
         }

@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ParserGeoTest {
     public static void main(String[] args) throws Exception {
         verifyCarSurfaceSpec();
+        verifyThemeResolution();
         String json = "{\"meta\":{\"ver\":\"3.0\",\"build\":3995,"
                 + "\"exportDate\":\"2026-08-28T05:05:00Z\"},"
                 + "\"objects\":["
@@ -111,10 +112,15 @@ public final class ParserGeoTest {
         directed.angleDegrees = 20f;
         directed.speedRules = SpeedControlRules.encode(60, false,
                 -1, -1, 0, 0, SpeedControlRules.CAR);
-        check(StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 0, 800),
+        check(StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 0),
                 "directional corridor accepts a straight approach");
-        check(!StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 30, 800),
+        check(!StrelkaAlertAlgorithm.matchesZone(directed, 400, 0, 30),
                 "directional corridor rejects a side object");
+        CameraPoint missingDistance = new CameraPoint();
+        missingDistance.id = 102;
+        missingDistance.dirType = 0;
+        check(!StrelkaAlertAlgorithm.matchesZone(missingDistance, 1, 0, 0),
+                "objects without database distance never enter the alert zone");
         check(StrelkaAlertAlgorithm.mustDropImmediately(directed, 50, 10, 0, 180),
                 "ordinary camera is dropped after passing");
         check(!StrelkaAlertAlgorithm.isOverspeeding(directed, 70f)
@@ -137,7 +143,7 @@ public final class ParserGeoTest {
         rear.distanceMeters = 500;
         rear.reverseDistanceMeters = 100;
         rear.angleDegrees = 20f;
-        check(StrelkaAlertAlgorithm.matchesZone(rear, 50, 0, 180, 800)
+        check(StrelkaAlertAlgorithm.matchesZone(rear, 50, 0, 180)
                         && !StrelkaAlertAlgorithm.mustDropImmediately(rear, 50, 50, 0, 180),
                 "rear-control zone continues after the object");
         check(StrelkaAlertAlgorithm.mustDropImmediately(rear, 50, 120, 0, 180),
@@ -161,10 +167,6 @@ public final class ParserGeoTest {
         verifyMapMarkerPresentationEquality();
         verifyDrivingSnapshotAndHud();
         verifyCarMenuItems();
-        check(AppSettings.adjustAlertDistance(300, -1) == 300
-                        && AppSettings.adjustAlertDistance(300, 1) == 400
-                        && AppSettings.adjustAlertDistance(2000, 1) == 2000,
-                "alert distance uses 300..2000 with a 100 meter step");
         check(AppSettings.adjustOverspeedThreshold(0, -1) == 0
                         && AppSettings.adjustOverspeedThreshold(20, 1) == 20,
                 "overspeed threshold uses 0..20 with a 1 km/h step");
@@ -174,12 +176,6 @@ public final class ParserGeoTest {
                 "HUD transparency uses 0..80 with a 5 percent step");
         check(!AppSettings.DEFAULT_AUTO_ROTATE_MAP,
                 "map auto-rotation is disabled by default");
-        check(AppSettings.clampAlertDistance(299) == 300
-                        && AppSettings.clampAlertDistance(350) == 300
-                        && AppSettings.clampAlertDistance(2300) == 2000
-                        && AppSettings.adjustAlertDistance(350, 1) == 400
-                        && AppSettings.adjustAlertDistance(350, -1) == 300,
-                "alert distance floors to its step grid before adjustment");
         check(AppSettings.clampHudTransparency(-5) == 0
                         && AppSettings.clampHudTransparency(12) == 10
                         && AppSettings.clampHudTransparency(95) == 80
@@ -200,6 +196,42 @@ public final class ParserGeoTest {
             System.out.println("Real file: " + real.count + " objects");
         }
         System.out.println("ParserGeoTest: OK");
+    }
+
+    private static void verifyThemeResolution() {
+        long equinoxNoonUtc = java.time.Instant.parse("2026-03-20T12:00:00Z").toEpochMilli();
+        long equinoxMidnightUtc = java.time.Instant.parse("2026-03-20T00:00:00Z").toEpochMilli();
+        check(!ThemeResolver.isDark(ThemeMode.LIGHT, equinoxMidnightUtc,
+                        0.0, 0.0, java.util.TimeZone.getTimeZone("UTC")),
+                "manual light theme overrides nighttime");
+        check(ThemeResolver.isDark(ThemeMode.DARK, equinoxNoonUtc,
+                        0.0, 0.0, java.util.TimeZone.getTimeZone("UTC")),
+                "manual dark theme overrides daylight");
+        check(!ThemeResolver.isDark(ThemeMode.AUTOMATIC, equinoxNoonUtc,
+                        0.0, 0.0, java.util.TimeZone.getTimeZone("UTC"))
+                        && ThemeResolver.isDark(ThemeMode.AUTOMATIC, equinoxMidnightUtc,
+                        0.0, 0.0, java.util.TimeZone.getTimeZone("UTC")),
+                "automatic theme follows solar daylight at the equator");
+
+        long tromsoSummerMidnight =
+                java.time.Instant.parse("2026-06-20T22:00:00Z").toEpochMilli();
+        long tromsoWinterNoon =
+                java.time.Instant.parse("2026-12-21T11:00:00Z").toEpochMilli();
+        check(!ThemeResolver.isDark(ThemeMode.AUTOMATIC, tromsoSummerMidnight,
+                        69.6492, 18.9553, java.util.TimeZone.getTimeZone("Europe/Oslo"))
+                        && ThemeResolver.isDark(ThemeMode.AUTOMATIC, tromsoWinterNoon,
+                        69.6492, 18.9553, java.util.TimeZone.getTimeZone("Europe/Oslo")),
+                "automatic theme handles polar day and polar night");
+
+        long fallbackNight = java.time.Instant.parse("2026-03-20T21:00:00Z").toEpochMilli();
+        long fallbackDay = java.time.Instant.parse("2026-03-20T08:00:00Z").toEpochMilli();
+        check(ThemeResolver.isDark(ThemeMode.AUTOMATIC, fallbackNight,
+                        Double.NaN, Double.NaN, java.util.TimeZone.getTimeZone("UTC"))
+                        && !ThemeResolver.isDark(ThemeMode.AUTOMATIC, fallbackDay,
+                        Double.NaN, Double.NaN, java.util.TimeZone.getTimeZone("UTC")),
+                "automatic theme uses the 20:00 to 07:00 fallback before GPS");
+        check(ThemeMode.fromStored("unexpected") == ThemeMode.AUTOMATIC,
+                "unknown stored theme defaults to automatic");
     }
 
     private static void verifyDrivingSnapshotAndHud() {
@@ -261,10 +293,10 @@ public final class ParserGeoTest {
     private static void verifyCarMenuItems() {
         check(java.util.Arrays.equals(CarMenuItem.values(), new CarMenuItem[] {
                         CarMenuItem.UPDATE_DATABASE,
-                        CarMenuItem.ALERT_DISTANCE,
                         CarMenuItem.OVERSPEED_THRESHOLD,
                         CarMenuItem.HUD_TRANSPARENCY,
                         CarMenuItem.AUTO_ROTATE_MAP,
+                        CarMenuItem.THEME,
                         CarMenuItem.MAPKIT_KEY,
                         CarMenuItem.ABOUT,
                         CarMenuItem.EXIT
@@ -455,29 +487,30 @@ public final class ParserGeoTest {
 
     private static void verifyKnownReleaseHistory() {
         List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
-        check(releases.size() == 10, "about dialog contains every known release");
-        check(releases.get(0).version.equals("4.9.6")
-                        && releases.get(1).version.equals("4.9.5")
-                        && releases.get(2).version.equals("4.9.4")
-                        && releases.get(3).version.equals("4.9.3")
-                        && releases.get(4).version.equals("4.9.2")
-                        && releases.get(5).version.equals("4.9.1")
-                        && releases.get(6).version.equals("4.9.0")
-                        && releases.get(7).version.equals("4.8.1")
-                        && releases.get(8).version.equals("4.8.0")
-                        && releases.get(9).version.equals("4.7.1"),
+        check(releases.size() == 11, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.7")
+                        && releases.get(1).version.equals("4.9.6")
+                        && releases.get(2).version.equals("4.9.5")
+                        && releases.get(3).version.equals("4.9.4")
+                        && releases.get(4).version.equals("4.9.3")
+                        && releases.get(5).version.equals("4.9.2")
+                        && releases.get(6).version.equals("4.9.1")
+                        && releases.get(7).version.equals("4.9.0")
+                        && releases.get(8).version.equals("4.8.1")
+                        && releases.get(9).version.equals("4.8.0")
+                        && releases.get(10).version.equals("4.7.1"),
                 "release history is newest first");
         for (ReleaseHistory.Entry release : releases) {
             check(release.changes != null && !release.changes.trim().isEmpty(),
                     "every release has a visible change description");
         }
-        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.6");
+        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.7");
         check(current != null && !current.changes.trim().isEmpty(),
                 "current release has a visible change description");
-        check(current.changes.contains("стрелк")
-                        && current.changes.contains("автоповорот")
-                        && current.changes.contains("GPS-курс"),
-                "current release describes the heading arrow and map auto-rotation");
+        check(current.changes.contains("ночной")
+                        && current.changes.contains("рассвета")
+                        && current.changes.contains("Android Auto"),
+                "current release describes automatic night mode on both surfaces");
         check(ReleaseHistory.find("missing") == null,
                 "unknown release has no fabricated description");
     }

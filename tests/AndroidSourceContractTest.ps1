@@ -250,8 +250,8 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
-Assert-Contains $buildGradle 'versionCode\s*=\s*41' "release must use versionCode 41"
-Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.6'" "release must use versionName 4.9.6"
+Assert-Contains $buildGradle 'versionCode\s*=\s*42' "release must use versionCode 42"
+Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.7'" "release must use versionName 4.9.7"
 Assert-Contains $buildGradle 'androidComponents\s*\{[\s\S]*beforeVariants\(selector\(\)\.withBuildType\("release"\)\)[\s\S]*enableUnitTest\s*=\s*true' "AGP must create a real release unit-test variant"
 foreach ($dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
@@ -469,13 +469,17 @@ Assert-Contains $carPresentation 'params\.leftMargin = dp\(8\)' "empty stable ar
 Assert-Contains $carPresentation 'params\.bottomMargin = dp\(8\)' "empty stable area must restore the default HUD bottom inset"
 Assert-Contains $carPresentation 'params\.width = dp\(300\)' "empty stable area must restore the default HUD width"
 Assert-Contains $carPresentation 'mapWindow\.setFocusRect\(null\)' "empty visible area must clear the MapKit focus rect"
-Assert-Contains $carPresentation 'isDarkMode' "Car HUD must follow car dark mode"
+Assert-Contains $carPresentation 'ThemeSettings\.isDark' "Car HUD must follow the shared user theme"
+Assert-Contains $sharedMapLayer 'setNightModeEnabled' "shared phone and car maps must apply MapKit night mode"
+Assert-Contains $sharedMapLayer 'individualMarkerStyle\(\)[\s\S]*?setScale\(1\.0f\)' "individual object markers must render at full scale"
+Assert-Contains $sharedMapLayer 'clusterMarkerStyle\(\)[\s\S]*?setScale\(1\.0f\)' "cluster markers must render at full scale"
+Assert-Contains $sharedMapLayer 'locationMarkerStyle\(\)[\s\S]*?setScale\(0\.8f\)' "location arrow must render at 80 percent scale"
 Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
 Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"
 Assert-Contains $carMapScreen 'setPanModeListener' "Car map must forward pan mode changes"
 Assert-Contains $carMapScreen 'getCarService\(ScreenManager\.class\)[\s\S]*push\(new CarMenuScreen' "Car map menu action must push the real menu through ScreenManager"
 Assert-Contains $carMapScreen 'R\.drawable\.ic_car_menu' "Car map menu action must use its monochrome icon"
-Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*ALERT_DISTANCE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*AUTO_ROTATE_MAP,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
+Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*AUTO_ROTATE_MAP,\s*THEME,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
 Assert-Contains $carMenu 'ListTemplate\.Builder\(\)[\s\S]*setHeaderAction\(Action\.BACK\)[\s\S]*setSingleList' "Car menu must use one back-enabled ListTemplate"
 Assert-Contains $carMenu 'application\(carContext\)\.radarBaseUpdater\(\)' "Car menu must reuse the application-owned RadarBaseUpdater"
 if ($carMenu -match 'new\s+RadarBaseUpdater\s*\(|new\s+StrelkaAlertTracker\s*\(') {
@@ -493,8 +497,7 @@ Assert-Contains $carMenu 'popToRoot\(\)' "Explicit Android Auto exit must pop to
 Assert-Contains $carMenu 'finishCarApp\(\)' "Explicit Android Auto exit must finish the car app"
 
 foreach ($settingsMethod in @(
-        "adjustAlertDistance", "adjustOverspeedThreshold",
-        "adjustHudTransparency")) {
+        "adjustOverspeedThreshold", "adjustHudTransparency")) {
     Assert-Contains $carValue ([regex]::Escape("AppSettings.$settingsMethod(")) "CarValueScreen must reuse AppSettings.$settingsMethod"
 }
 Assert-Contains $carValue 'putInt\(setting\.preferenceKey\(\),\s*adjusted\)\.commit\(\)' "Car numeric settings must be persisted synchronously"

@@ -111,6 +111,7 @@ public final class TrackingService extends Service implements LocationListener {
         List<CameraPoint> candidates = database.nearby(location.getLatitude(), location.getLongitude(), 5000);
         if (candidates == null) return;
         for (CameraPoint object : candidates) {
+            if (object.distanceMeters <= 0) continue;
             double distance = Geo.distanceMeters(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
             if (distance > 5000) continue;
@@ -143,7 +144,7 @@ public final class TrackingService extends Service implements LocationListener {
             alertedCameraId = -1;
             finalWarning = false;
         } else {
-            int alertDistance = configuredAlertDistance();
+            int alertDistance = StrelkaAlertAlgorithm.activationDistance(nearestCamera);
             if (nearestCamera.id != alertedCameraId && nearestCameraDistance <= alertDistance) {
                 alertedCameraId = nearestCamera.id;
                 finalWarning = false;
@@ -190,7 +191,7 @@ public final class TrackingService extends Service implements LocationListener {
                 ? 0 : nearest.currentSpeedLimit());
         update.putExtra(EXTRA_ALERT_DISTANCE, nearest == null ? 0
                 : nearest.isRoadObject() ? roadAlertDistance(nearest)
-                : configuredAlertDistance());
+                : StrelkaAlertAlgorithm.activationDistance(nearest));
         sendBroadcast(update);
 
         String line = nearest == null ? Math.round(speedKmh) + " км/ч"
@@ -202,13 +203,6 @@ public final class TrackingService extends Service implements LocationListener {
 
     private boolean strelkaAlertsEnabled() {
         return true;
-    }
-
-    private int configuredAlertDistance() {
-        return AppSettings.clampAlertDistance(
-                getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
-                        .getInt(AppSettings.ALERT_DISTANCE,
-                                AppSettings.DEFAULT_ALERT_DISTANCE_METERS));
     }
 
     private void onStrelkaLocationChanged(Location location) {
@@ -235,7 +229,6 @@ public final class TrackingService extends Service implements LocationListener {
                 visualHeading, radarHeading, proposedRadarHeading,
                 scanDecision.scanRequested, lastRadarScan != null);
         float alertHeading = headings.alertHeading;
-        int fallbackAlertDistance = configuredAlertDistance();
         int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
                 getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE)
                         .getInt(AppSettings.OVERSPEED_THRESHOLD,
@@ -251,15 +244,15 @@ public final class TrackingService extends Service implements LocationListener {
         boolean scanPerformed = scanDecision.scanRequested && !candidatesUnavailable;
         if (candidates == null) candidates = Collections.emptyList();
         for (CameraPoint object : candidates) {
+            int alertDistance = StrelkaAlertAlgorithm.activationDistance(object);
+            if (alertDistance == 0) continue;
             double distance = Geo.distanceMeters(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
             if (distance > StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS) continue;
             float bearing = Geo.bearing(location.getLatitude(), location.getLongitude(),
                     object.latitude, object.longitude);
-            int alertDistance = StrelkaAlertAlgorithm.activationDistance(
-                    object, fallbackAlertDistance);
             boolean matchesZone = StrelkaAlertAlgorithm.matchesZone(object, distance,
-                    alertHeading, bearing, fallbackAlertDistance);
+                    alertHeading, bearing);
             boolean dropImmediately = StrelkaAlertAlgorithm.mustDropImmediately(
                     object, speedKmh, distance, alertHeading, bearing);
             observations.add(new StrelkaAlertTracker.Observation(object,

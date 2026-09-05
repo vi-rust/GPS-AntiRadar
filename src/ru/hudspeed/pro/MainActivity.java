@@ -56,27 +56,52 @@ public final class MainActivity extends Activity {
     private static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
             AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD;
     private static final long HINT_ANIMATION_MS = 220L;
+    private static final long THEME_REFRESH_MS = 60_000L;
 
     private TextView speedView;
+    private TextView unitView;
     private TextView distanceView;
     private TextView cameraView;
+    private TextView mapNoticeView;
     private TextView aboutDatabaseCountView;
     private TextView aboutLastDownloadView;
+    private FrameLayout screenView;
     private LinearLayout hudPanel;
+    private LinearLayout zoomControlsView;
     private FrameLayout mapOverlay;
+    private View zoomDividerView;
+    private ImageButton menuButtonView;
+    private ImageButton zoomInButtonView;
+    private ImageButton zoomOutButtonView;
+    private ImageButton positionButtonView;
     private TextView cameraHintView;
     private MapView mapView;
     private SharedCameraMapLayer cameraMapLayer;
     private boolean mapInitialized;
     private boolean mapRecoveryRequired;
     private boolean hasCurrentLocation;
+    private boolean darkTheme;
     private int hintGeneration;
+
+    private final Runnable themeRefresh = new Runnable() {
+        @Override public void run() {
+            refreshThemeIfNeeded();
+            View decor = getWindow().getDecorView();
+            decor.removeCallbacks(this);
+            decor.postDelayed(this, THEME_REFRESH_MS);
+        }
+    };
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             DrivingSnapshot snapshot = DrivingSnapshotIntent.from(intent);
             DrivingHudPresentation presentation = DrivingHudPresentation.from(snapshot);
             hasCurrentLocation = snapshot.hasLocation();
+            if (snapshot.hasLocation()) {
+                ThemeSettings.rememberLocation(MainActivity.this,
+                        snapshot.latitude, snapshot.longitude);
+                refreshThemeIfNeeded(snapshot.latitude, snapshot.longitude);
+            }
             speedView.setText(presentation.speedText);
             distanceView.setText(presentation.distanceText);
             cameraView.setText(presentation.cameraText);
@@ -105,6 +130,8 @@ public final class MainActivity extends Activity {
             };
 
     @Override protected void onCreate(Bundle state) {
+        darkTheme = ThemeSettings.isDark(this);
+        setTheme(darkTheme ? R.style.AppThemeDark : R.style.AppTheme);
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyImmersiveMode();
@@ -149,6 +176,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        refreshThemeIfNeeded();
         applyImmersiveMode();
     }
 
@@ -216,7 +244,8 @@ public final class MainActivity extends Activity {
 
     private void buildUi() {
         FrameLayout screen = new FrameLayout(this);
-        screen.setBackgroundColor(Color.rgb(242, 244, 246));
+        screenView = screen;
+        screen.setBackgroundColor(screenBackgroundColor());
         if (mapInitialized) {
             try {
                 mapView = new MapView(this);
@@ -243,6 +272,7 @@ public final class MainActivity extends Activity {
                         }, 3000L);
                     }
                 });
+                cameraMapLayer.setNightMode(darkTheme);
             } catch (Throwable error) {
                 if (cameraMapLayer != null) cameraMapLayer.destroy();
                 cameraMapLayer = null;
@@ -254,10 +284,10 @@ public final class MainActivity extends Activity {
             }
         }
         if (!mapInitialized) {
-            TextView mapNotice = text("Для Яндекс-карты нужен ключ MapKit", 20,
-                    Color.DKGRAY, Typeface.BOLD);
-            mapNotice.setGravity(Gravity.CENTER);
-            screen.addView(mapNotice, new FrameLayout.LayoutParams(-1, -1));
+            mapNoticeView = text("Для Яндекс-карты нужен ключ MapKit", 20,
+                    secondaryTextColor(), Typeface.BOLD);
+            mapNoticeView.setGravity(Gravity.CENTER);
+            screen.addView(mapNoticeView, new FrameLayout.LayoutParams(-1, -1));
         }
 
         FrameLayout overlay = new FrameLayout(this);
@@ -309,14 +339,15 @@ public final class MainActivity extends Activity {
         speedView = text("0", 46, GREEN, Typeface.BOLD);
         speedView.setIncludeFontPadding(false);
         hudPanel.addView(speedView);
-        TextView unit = text("км/ч", 13, Color.DKGRAY, Typeface.NORMAL);
-        hudPanel.addView(unit);
-        distanceView = text("—", 24, Color.rgb(30, 30, 30), Typeface.BOLD);
+        unitView = text("км/ч", 13, secondaryTextColor(), Typeface.NORMAL);
+        hudPanel.addView(unitView);
+        distanceView = text("—", 24, primaryTextColor(), Typeface.BOLD);
         hudPanel.addView(distanceView);
         cameraView = text("Объектов впереди нет", 13, GREEN, Typeface.BOLD);
         cameraView.setGravity(Gravity.START);
         hudPanel.addView(cameraView);
         ImageButton menuButton = iconButton(ru.gpsantiradar.app.R.drawable.ic_menu, "Меню");
+        menuButtonView = menuButton;
         menuButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showAppMenu(); }
         });
@@ -326,12 +357,14 @@ public final class MainActivity extends Activity {
         overlay.addView(menuButton, menuParams);
 
         LinearLayout zoomControls = new LinearLayout(this);
+        zoomControlsView = zoomControls;
         zoomControls.setOrientation(LinearLayout.VERTICAL);
         zoomControls.setGravity(Gravity.CENTER);
-        zoomControls.setBackground(roundedBackground(Color.argb(250, 255, 255, 255), 7));
+        zoomControls.setBackground(roundedBackground(controlSurfaceColor(), 7));
         zoomControls.setElevation(dp(4));
         ImageButton zoomIn = segmentedIconButton(
                 ru.gpsantiradar.app.R.drawable.ic_add, "Увеличить карту");
+        zoomInButtonView = zoomIn;
         zoomIn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (cameraMapLayer != null) cameraMapLayer.zoomBy(1f);
@@ -339,12 +372,14 @@ public final class MainActivity extends Activity {
         });
         zoomControls.addView(zoomIn, new LinearLayout.LayoutParams(dp(44), dp(44)));
         View zoomDivider = new View(this);
-        zoomDivider.setBackgroundColor(Color.rgb(218, 218, 218));
+        zoomDividerView = zoomDivider;
+        zoomDivider.setBackgroundColor(dividerColor());
         LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(-1, dp(1));
         dividerParams.setMargins(dp(7), 0, dp(7), 0);
         zoomControls.addView(zoomDivider, dividerParams);
         ImageButton zoomOut = segmentedIconButton(
                 ru.gpsantiradar.app.R.drawable.ic_remove, "Уменьшить карту");
+        zoomOutButtonView = zoomOut;
         zoomOut.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (cameraMapLayer != null) cameraMapLayer.zoomBy(-1f);
@@ -358,6 +393,7 @@ public final class MainActivity extends Activity {
 
         ImageButton positionButton = iconButton(
                 ru.gpsantiradar.app.R.drawable.ic_my_location, "Моя точка");
+        positionButtonView = positionButton;
         positionButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { centerOnLocation(); }
         });
@@ -366,10 +402,10 @@ public final class MainActivity extends Activity {
         positionParams.setMargins(0, 0, dp(6), dp(6));
         overlay.addView(positionButton, positionParams);
 
-        cameraHintView = text("", 14, Color.BLACK, Typeface.BOLD);
+        cameraHintView = text("", 14, primaryTextColor(), Typeface.BOLD);
         cameraHintView.setMaxWidth(dp(360));
         cameraHintView.setPadding(dp(10), dp(7), dp(10), dp(7));
-        cameraHintView.setBackground(roundedBackground(Color.argb(248, 255, 255, 255), 10));
+        cameraHintView.setBackground(roundedBackground(hintSurfaceColor(), 10));
         cameraHintView.setElevation(dp(6));
         cameraHintView.setVisibility(View.GONE);
         overlay.addView(cameraHintView, new FrameLayout.LayoutParams(-2, -2));
@@ -386,53 +422,13 @@ public final class MainActivity extends Activity {
                 ru.gpsantiradar.app.R.drawable.ic_refresh, "Обновить базу объектов");
         content.addView(update, new LinearLayout.LayoutParams(-1, dp(54)));
 
-        LinearLayout distanceRow = new LinearLayout(this);
-        distanceRow.setOrientation(LinearLayout.HORIZONTAL);
-        distanceRow.setGravity(Gravity.CENTER_VERTICAL);
-        distanceRow.setPadding(dp(12), dp(6), dp(12), dp(6));
-        ImageView distanceIcon = new ImageView(this);
-        distanceIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_distance);
-        distanceRow.addView(distanceIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
-        LinearLayout distanceContent = new LinearLayout(this);
-        distanceContent.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams distanceContentParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        distanceContentParams.setMargins(dp(14), 0, 0, 0);
-        distanceRow.addView(distanceContent, distanceContentParams);
-        final TextView distanceLabel = text("", 15, Color.rgb(35, 35, 35), Typeface.NORMAL);
-        distanceContent.addView(distanceLabel);
-        SeekBar range = new SeekBar(this);
-        range.setMax((AppSettings.MAX_ALERT_DISTANCE_METERS
-                - AppSettings.MIN_ALERT_DISTANCE_METERS)
-                / AppSettings.ALERT_DISTANCE_STEP_METERS);
-        int savedDistance = AppSettings.clampAlertDistance(
-                getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
-                        AppSettings.ALERT_DISTANCE,
-                        AppSettings.DEFAULT_ALERT_DISTANCE_METERS));
-        range.setProgress((savedDistance - AppSettings.MIN_ALERT_DISTANCE_METERS)
-                / AppSettings.ALERT_DISTANCE_STEP_METERS);
-        distanceLabel.setText("Расстояние оповещения: "
-                + savedDistance + " м");
-        range.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int distance = AppSettings.clampAlertDistance(
-                        AppSettings.MIN_ALERT_DISTANCE_METERS
-                                + progress * AppSettings.ALERT_DISTANCE_STEP_METERS);
-                distanceLabel.setText("Расстояние оповещения: " + distance + " м");
-                getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .putInt(AppSettings.ALERT_DISTANCE, distance).apply();
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        distanceContent.addView(range, new LinearLayout.LayoutParams(-1, dp(42)));
-        content.addView(distanceRow, new LinearLayout.LayoutParams(-1, dp(86)));
-
         LinearLayout overspeedRow = new LinearLayout(this);
         overspeedRow.setOrientation(LinearLayout.HORIZONTAL);
         overspeedRow.setGravity(Gravity.CENTER_VERTICAL);
         overspeedRow.setPadding(dp(12), dp(6), dp(12), dp(6));
         ImageView overspeedIcon = new ImageView(this);
         overspeedIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_speed_limit);
+        tintIcon(overspeedIcon);
         overspeedRow.addView(overspeedIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
         LinearLayout overspeedContent = new LinearLayout(this);
         overspeedContent.setOrientation(LinearLayout.VERTICAL);
@@ -441,7 +437,7 @@ public final class MainActivity extends Activity {
         overspeedContentParams.setMargins(dp(14), 0, 0, 0);
         overspeedRow.addView(overspeedContent, overspeedContentParams);
         final TextView overspeedLabel = text("", 15,
-                Color.rgb(35, 35, 35), Typeface.NORMAL);
+                primaryTextColor(), Typeface.NORMAL);
         overspeedContent.addView(overspeedLabel);
         SeekBar overspeedThreshold = new SeekBar(this);
         overspeedThreshold.setMax(AppSettings.MAX_OVERSPEED_THRESHOLD_KMH);
@@ -475,6 +471,7 @@ public final class MainActivity extends Activity {
         transparencyRow.setPadding(dp(12), dp(6), dp(12), dp(6));
         ImageView transparencyIcon = new ImageView(this);
         transparencyIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_opacity);
+        tintIcon(transparencyIcon);
         transparencyRow.addView(transparencyIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
         LinearLayout transparencyContent = new LinearLayout(this);
         transparencyContent.setOrientation(LinearLayout.VERTICAL);
@@ -482,7 +479,7 @@ public final class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(0, -2, 1f);
         transparencyContentParams.setMargins(dp(14), 0, 0, 0);
         transparencyRow.addView(transparencyContent, transparencyContentParams);
-        final TextView transparencyLabel = text("", 15, Color.rgb(35, 35, 35), Typeface.NORMAL);
+        final TextView transparencyLabel = text("", 15, primaryTextColor(), Typeface.NORMAL);
         transparencyContent.addView(transparencyLabel);
         SeekBar transparency = new SeekBar(this);
         transparency.setMax((AppSettings.MAX_HUD_TRANSPARENCY_PERCENT
@@ -495,14 +492,14 @@ public final class MainActivity extends Activity {
         transparency.setProgress((savedTransparency
                 - AppSettings.MIN_HUD_TRANSPARENCY_PERCENT)
                 / AppSettings.HUD_TRANSPARENCY_STEP_PERCENT);
-        transparencyLabel.setText("Прозрачность плашки: "
+        transparencyLabel.setText("Прозрачность HUD: "
                 + savedTransparency + "%");
         transparency.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = AppSettings.clampHudTransparency(
                         AppSettings.MIN_HUD_TRANSPARENCY_PERCENT
                                 + progress * AppSettings.HUD_TRANSPARENCY_STEP_PERCENT);
-                transparencyLabel.setText("Прозрачность плашки: " + value + "%");
+                transparencyLabel.setText("Прозрачность HUD: " + value + "%");
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
                         .putInt(AppSettings.HUD_TRANSPARENCY, value).apply();
                 applyHudTransparency(value);
@@ -519,12 +516,13 @@ public final class MainActivity extends Activity {
         autoRotateRow.setPadding(dp(12), dp(4), dp(12), dp(4));
         ImageView autoRotateIcon = new ImageView(this);
         autoRotateIcon.setImageResource(ru.gpsantiradar.app.R.drawable.ic_navigation);
+        tintIcon(autoRotateIcon);
         autoRotateRow.addView(autoRotateIcon,
                 new LinearLayout.LayoutParams(dp(28), dp(28)));
         Switch autoRotate = new Switch(this);
         autoRotate.setText("Автоповорот карты");
         autoRotate.setTextSize(15);
-        autoRotate.setTextColor(Color.rgb(35, 35, 35));
+        autoRotate.setTextColor(primaryTextColor());
         autoRotate.setChecked(getSharedPreferences(SETTINGS, MODE_PRIVATE).getBoolean(
                 AppSettings.AUTO_ROTATE_MAP, AppSettings.DEFAULT_AUTO_ROTATE_MAP));
         autoRotate.setOnCheckedChangeListener((button, enabled) ->
@@ -536,8 +534,13 @@ public final class MainActivity extends Activity {
         autoRotateRow.addView(autoRotate, autoRotateParams);
         content.addView(autoRotateRow, new LinearLayout.LayoutParams(-1, dp(54)));
 
+        final LinearLayout theme = menuAction(
+                ru.gpsantiradar.app.R.drawable.ic_theme,
+                "Тема: " + ThemeSettings.mode(this).title());
+        content.addView(theme, new LinearLayout.LayoutParams(-1, dp(54)));
+
         final LinearLayout mapKey = menuAction(
-                ru.gpsantiradar.app.R.drawable.ic_key, "Сменить ключ MapKit");
+                ru.gpsantiradar.app.R.drawable.ic_key, "Ключ MapKit");
         content.addView(mapKey, new LinearLayout.LayoutParams(-1, dp(54)));
 
         final LinearLayout about = menuAction(
@@ -545,7 +548,7 @@ public final class MainActivity extends Activity {
         content.addView(about, new LinearLayout.LayoutParams(-1, dp(54)));
 
         final LinearLayout exit = menuAction(
-                ru.gpsantiradar.app.R.drawable.ic_exit, "\u0412\u044b\u0439\u0442\u0438");
+                ru.gpsantiradar.app.R.drawable.ic_exit, "Выйти");
         content.addView(exit, new LinearLayout.LayoutParams(-1, dp(54)));
 
         ScrollView scroll = new ScrollView(this);
@@ -553,7 +556,7 @@ public final class MainActivity extends Activity {
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
 
         final AlertDialog dialog = new AlertDialog.Builder(this,
-                android.R.style.Theme_Material_Light_Dialog_Alert)
+                dialogTheme())
                 .setView(scroll)
                 .setNegativeButton("Закрыть", null)
                 .create();
@@ -568,6 +571,12 @@ public final class MainActivity extends Activity {
             @Override public void onClick(View v) {
                 dialog.dismiss();
                 showMapKeyDialog();
+            }
+        });
+        theme.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dialog.dismiss();
+                showThemeDialog();
             }
         });
         about.setOnClickListener(new View.OnClickListener() {
@@ -586,34 +595,56 @@ public final class MainActivity extends Activity {
         styleRoundedDialog(dialog);
     }
 
+    private void showThemeDialog() {
+        ThemeMode current = ThemeSettings.mode(this);
+        ThemeMode[] modes = ThemeMode.values();
+        String[] titles = new String[modes.length];
+        for (int index = 0; index < modes.length; index++) {
+            titles[index] = modes[index].title();
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this, dialogTheme())
+                .setTitle("Тема")
+                .setSingleChoiceItems(titles, current.ordinal(), (choice, which) -> {
+                    ThemeMode selected = modes[which];
+                    choice.dismiss();
+                    if (selected == ThemeSettings.mode(MainActivity.this)) return;
+                    ThemeSettings.setMode(MainActivity.this, selected);
+                    refreshThemeIfNeeded();
+                })
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.show();
+        styleRoundedDialog(dialog);
+    }
+
     private void showAboutDialog() {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(20), dp(16), dp(20), dp(12));
 
-        TextView appName = text("GPS AntiRadar", 22, Color.rgb(30, 30, 30), Typeface.BOLD);
+        TextView appName = text("GPS AntiRadar", 22, primaryTextColor(), Typeface.BOLD);
         content.addView(appName, new LinearLayout.LayoutParams(-1, -2));
 
         TextView currentVersion = text("Версия " + BuildConfig.VERSION_NAME, 14,
-                Color.DKGRAY, Typeface.NORMAL);
+                secondaryTextColor(), Typeface.NORMAL);
         LinearLayout.LayoutParams currentVersionParams =
                 new LinearLayout.LayoutParams(-1, -2);
         currentVersionParams.setMargins(0, dp(2), 0, dp(16));
         content.addView(currentVersion, currentVersionParams);
 
         TextView databaseTitle = text("База объектов", 17,
-                Color.rgb(30, 30, 30), Typeface.BOLD);
+                primaryTextColor(), Typeface.BOLD);
         content.addView(databaseTitle, new LinearLayout.LayoutParams(-1, -2));
 
         aboutDatabaseCountView = text("Объектов в базе: загрузка…", 14,
-                Color.rgb(45, 45, 45), Typeface.NORMAL);
+                secondaryTextColor(), Typeface.NORMAL);
         LinearLayout.LayoutParams databaseCountParams =
                 new LinearLayout.LayoutParams(-1, -2);
         databaseCountParams.setMargins(0, dp(4), 0, 0);
         content.addView(aboutDatabaseCountView, databaseCountParams);
 
         aboutLastDownloadView = text("Последняя успешная загрузка: не выполнялась", 14,
-                Color.rgb(45, 45, 45), Typeface.NORMAL);
+                secondaryTextColor(), Typeface.NORMAL);
         LinearLayout.LayoutParams lastDownloadParams =
                 new LinearLayout.LayoutParams(-1, -2);
         lastDownloadParams.setMargins(0, dp(2), 0, dp(16));
@@ -623,11 +654,11 @@ public final class MainActivity extends Activity {
         ReleaseHistory.Entry currentRelease = ReleaseHistory.find(BuildConfig.VERSION_NAME);
         if (currentRelease != null) {
             TextView currentChangesTitle = text("Изменения текущей версии", 17,
-                    Color.rgb(30, 30, 30), Typeface.BOLD);
+                    primaryTextColor(), Typeface.BOLD);
             content.addView(currentChangesTitle, new LinearLayout.LayoutParams(-1, -2));
 
             TextView currentChanges = text(currentRelease.changes, 14,
-                    Color.rgb(45, 45, 45), Typeface.NORMAL);
+                    secondaryTextColor(), Typeface.NORMAL);
             currentChanges.setLineSpacing(dp(2), 1f);
             LinearLayout.LayoutParams currentChangesParams =
                     new LinearLayout.LayoutParams(-1, -2);
@@ -636,13 +667,13 @@ public final class MainActivity extends Activity {
         }
 
         TextView historyTitle = text("История релизов", 17,
-                Color.rgb(30, 30, 30), Typeface.BOLD);
+                primaryTextColor(), Typeface.BOLD);
         content.addView(historyTitle, new LinearLayout.LayoutParams(-1, -2));
 
         for (ReleaseHistory.Entry release : ReleaseHistory.entries()) {
             if (BuildConfig.VERSION_NAME.equals(release.version)) continue;
             View divider = new View(this);
-            divider.setBackgroundColor(Color.rgb(225, 228, 231));
+            divider.setBackgroundColor(dividerColor());
             LinearLayout.LayoutParams dividerParams =
                     new LinearLayout.LayoutParams(-1, dp(1));
             dividerParams.setMargins(0, dp(14), 0, dp(12));
@@ -653,7 +684,7 @@ public final class MainActivity extends Activity {
             content.addView(version, new LinearLayout.LayoutParams(-1, -2));
 
             TextView changes = text(release.changes, 14,
-                    Color.rgb(45, 45, 45), Typeface.NORMAL);
+                    secondaryTextColor(), Typeface.NORMAL);
             changes.setLineSpacing(dp(2), 1f);
             LinearLayout.LayoutParams changesParams =
                     new LinearLayout.LayoutParams(-1, -2);
@@ -665,7 +696,7 @@ public final class MainActivity extends Activity {
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
 
         AlertDialog dialog = new AlertDialog.Builder(this,
-                android.R.style.Theme_Material_Light_Dialog_Alert)
+                dialogTheme())
                 .setView(scroll)
                 .setNegativeButton("Закрыть", null)
                 .create();
@@ -699,8 +730,9 @@ public final class MainActivity extends Activity {
         row.setFocusable(true);
         ImageView icon = new ImageView(this);
         icon.setImageResource(iconResource);
+        tintIcon(icon);
         row.addView(icon, new LinearLayout.LayoutParams(dp(28), dp(28)));
-        TextView title = text(label, 16, Color.rgb(35, 35, 35), Typeface.NORMAL);
+        TextView title = text(label, 16, primaryTextColor(), Typeface.NORMAL);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
         titleParams.setMargins(dp(14), 0, 0, 0);
         row.addView(title, titleParams);
@@ -710,10 +742,11 @@ public final class MainActivity extends Activity {
     private ImageButton iconButton(int iconResource, String description) {
         ImageButton button = new ImageButton(this);
         button.setImageResource(iconResource);
+        tintIcon(button);
         button.setContentDescription(description);
         button.setScaleType(ImageView.ScaleType.CENTER);
         button.setPadding(dp(10), dp(10), dp(10), dp(10));
-        button.setBackground(roundedBackground(Color.argb(250, 255, 255, 255), 7));
+        button.setBackground(roundedBackground(controlSurfaceColor(), 7));
         button.setElevation(dp(4));
         return button;
     }
@@ -721,6 +754,7 @@ public final class MainActivity extends Activity {
     private ImageButton segmentedIconButton(int iconResource, String description) {
         ImageButton button = new ImageButton(this);
         button.setImageResource(iconResource);
+        tintIcon(button);
         button.setContentDescription(description);
         button.setScaleType(ImageView.ScaleType.CENTER);
         button.setPadding(dp(10), dp(10), dp(10), dp(10));
@@ -772,10 +806,10 @@ public final class MainActivity extends Activity {
         final EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("API-ключ MapKit Mobile SDK");
-        input.setTextColor(Color.rgb(35, 35, 35));
-        input.setHintTextColor(Color.rgb(105, 105, 105));
+        input.setTextColor(primaryTextColor());
+        input.setHintTextColor(secondaryTextColor());
         input.setPadding(dp(16), dp(8), dp(16), dp(8));
-        input.setBackground(roundedBackground(Color.rgb(248, 248, 248), 7));
+        input.setBackground(roundedBackground(inputSurfaceColor(), 7));
         String message = mapRecoveryRequired
                 ? "Предыдущий ключ был отклонён сервером. Вставьте действующий ключ из раздела «MapKit – мобильный SDK». После сохранения полностью закройте и заново откройте приложение."
                 : "Вставьте ключ из раздела «Интерфейсы API → MapKit – мобильный SDK». После сохранения полностью закройте и заново откройте приложение.";
@@ -783,13 +817,13 @@ public final class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(18), dp(12), dp(18), dp(4));
         TextView explanation = text(message + " Ключ хранится только на телефоне.",
-                14, Color.rgb(35, 35, 35), Typeface.NORMAL);
+                14, primaryTextColor(), Typeface.NORMAL);
         content.addView(explanation, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(52));
         inputParams.setMargins(0, dp(10), 0, 0);
         content.addView(input, inputParams);
         final AlertDialog dialog = new AlertDialog.Builder(this,
-                android.R.style.Theme_Material_Light_Dialog_Alert)
+                dialogTheme())
                 .setView(content)
                 .setNegativeButton("Позже", null)
                 .setPositiveButton("Сохранить", (buttonDialog, which) -> {
@@ -817,8 +851,59 @@ public final class MainActivity extends Activity {
         int parentPanelId = getResources().getIdentifier("parentPanel", "id", "android");
         View parentPanel = dialog.findViewById(parentPanelId);
         if (parentPanel != null) {
-            parentPanel.setBackground(roundedBackground(Color.WHITE, 14));
+            parentPanel.setBackground(roundedBackground(dialogSurfaceColor(), 14));
             parentPanel.setClipToOutline(true);
+        }
+    }
+
+    private boolean refreshThemeIfNeeded() {
+        return applyResolvedTheme(ThemeSettings.isDark(this));
+    }
+
+    private boolean refreshThemeIfNeeded(double latitude, double longitude) {
+        return applyResolvedTheme(ThemeSettings.isDark(
+                this, System.currentTimeMillis(), latitude, longitude));
+    }
+
+    private boolean applyResolvedTheme(boolean resolvedDarkTheme) {
+        if (resolvedDarkTheme == darkTheme) {
+            if (cameraMapLayer != null) cameraMapLayer.setNightMode(darkTheme);
+            return false;
+        }
+        darkTheme = resolvedDarkTheme;
+        setTheme(darkTheme ? R.style.AppThemeDark : R.style.AppTheme);
+        applyThemeToCurrentViews();
+        return true;
+    }
+
+    private void applyThemeToCurrentViews() {
+        if (screenView != null) screenView.setBackgroundColor(screenBackgroundColor());
+        if (mapNoticeView != null) mapNoticeView.setTextColor(secondaryTextColor());
+        if (unitView != null) unitView.setTextColor(secondaryTextColor());
+        if (distanceView != null) distanceView.setTextColor(primaryTextColor());
+        if (zoomControlsView != null) {
+            zoomControlsView.setBackground(roundedBackground(controlSurfaceColor(), 7));
+        }
+        if (zoomDividerView != null) zoomDividerView.setBackgroundColor(dividerColor());
+        applyControlTheme(menuButtonView, true);
+        applyControlTheme(zoomInButtonView, false);
+        applyControlTheme(zoomOutButtonView, false);
+        applyControlTheme(positionButtonView, true);
+        if (cameraHintView != null) {
+            cameraHintView.setTextColor(primaryTextColor());
+            cameraHintView.setBackground(roundedBackground(hintSurfaceColor(), 10));
+        }
+        applyHudTransparency(getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getInt(AppSettings.HUD_TRANSPARENCY,
+                        AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
+        if (cameraMapLayer != null) cameraMapLayer.setNightMode(darkTheme);
+    }
+
+    private void applyControlTheme(ImageButton button, boolean withSurface) {
+        if (button == null) return;
+        tintIcon(button);
+        if (withSurface) {
+            button.setBackground(roundedBackground(controlSurfaceColor(), 7));
         }
     }
 
@@ -875,7 +960,7 @@ public final class MainActivity extends Activity {
                         @Override public void run() {
                             if (count == 0) {
                                 cameraView.setText("Обновите базу RadarBase");
-                                cameraView.setTextColor(Color.DKGRAY);
+                                cameraView.setTextColor(secondaryTextColor());
                             }
                         }
                     });
@@ -956,7 +1041,56 @@ public final class MainActivity extends Activity {
         if (hudPanel == null) return;
         int transparency = AppSettings.clampHudTransparency(transparencyPercent);
         int alpha = Math.round(255f * (100 - transparency) / 100f);
-        hudPanel.setBackground(roundedBackground(Color.argb(alpha, 255, 255, 255), 14));
+        int base = darkTheme ? Color.rgb(28, 30, 32) : Color.WHITE;
+        hudPanel.setBackground(roundedBackground(Color.argb(alpha,
+                Color.red(base), Color.green(base), Color.blue(base)), 14));
+    }
+
+    private int screenBackgroundColor() {
+        return darkTheme ? Color.rgb(18, 18, 18) : Color.rgb(242, 244, 246);
+    }
+
+    private int primaryTextColor() {
+        return darkTheme ? Color.rgb(238, 238, 238) : Color.rgb(30, 30, 30);
+    }
+
+    private int secondaryTextColor() {
+        return darkTheme ? Color.rgb(185, 190, 195) : Color.rgb(70, 70, 70);
+    }
+
+    private int controlSurfaceColor() {
+        return darkTheme ? Color.argb(250, 32, 35, 38)
+                : Color.argb(250, 255, 255, 255);
+    }
+
+    private int dialogSurfaceColor() {
+        return darkTheme ? Color.rgb(32, 35, 38) : Color.WHITE;
+    }
+
+    private int hintSurfaceColor() {
+        return darkTheme ? Color.argb(248, 32, 35, 38)
+                : Color.argb(248, 255, 255, 255);
+    }
+
+    private int inputSurfaceColor() {
+        return darkTheme ? Color.rgb(44, 47, 50) : Color.rgb(248, 248, 248);
+    }
+
+    private int dividerColor() {
+        return darkTheme ? Color.rgb(78, 82, 86) : Color.rgb(218, 218, 218);
+    }
+
+    private int dialogTheme() {
+        return darkTheme ? android.R.style.Theme_Material_Dialog_Alert
+                : android.R.style.Theme_Material_Light_Dialog_Alert;
+    }
+
+    private void tintIcon(ImageView icon) {
+        if (darkTheme) {
+            icon.setColorFilter(Color.rgb(235, 235, 235));
+        } else {
+            icon.clearColorFilter();
+        }
     }
 
     private int dp(int value) {
@@ -1004,9 +1138,13 @@ public final class MainActivity extends Activity {
             ((GpsAntiRadarApplication) getApplication()).acquireMapKit();
             mapView.onStart();
         }
+        View decor = getWindow().getDecorView();
+        decor.removeCallbacks(themeRefresh);
+        decor.postDelayed(themeRefresh, THEME_REFRESH_MS);
     }
 
     @Override protected void onStop() {
+        getWindow().getDecorView().removeCallbacks(themeRefresh);
         if (mapView != null) {
             mapView.onStop();
             ((GpsAntiRadarApplication) getApplication()).releaseMapKit();

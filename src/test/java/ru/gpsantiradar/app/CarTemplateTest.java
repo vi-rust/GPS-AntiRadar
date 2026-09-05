@@ -2,16 +2,23 @@ package ru.gpsantiradar.app;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.content.Context;
+import android.app.AlertDialog;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
+import android.graphics.drawable.ColorDrawable;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Surface;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 import androidx.car.app.CarContext;
 import androidx.car.app.AppManager;
@@ -39,14 +46,121 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Robolectric;
+import org.robolectric.shadows.ShadowAlertDialog;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.lang.reflect.Method;
 
 @RunWith(RobolectricTestRunner.class)
 public final class CarTemplateTest {
+    @Test public void releaseMetadataDescribesNightMode() {
+        assertEquals("4.9.7", BuildConfig.VERSION_NAME);
+        ReleaseHistory.Entry release = ReleaseHistory.find(BuildConfig.VERSION_NAME);
+        assertTrue(release != null);
+        assertTrue(release.changes.toLowerCase().contains("ночн"));
+    }
+
+    @Test public void themeTransitionKeepsCurrentPhoneViewAndHud() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        ThemeSettings.setMode(context, ThemeMode.LIGHT);
+        MainActivity activity = Robolectric.buildActivity(MainActivity.class)
+                .create().get();
+        ViewGroup content = activity.findViewById(android.R.id.content);
+        View root = content.getChildAt(0);
+        TextView speed = findText(root, "0");
+        assertTrue(speed != null);
+        speed.setText("83");
+        Method applyTheme = MainActivity.class.getDeclaredMethod(
+                "applyResolvedTheme", boolean.class);
+        applyTheme.setAccessible(true);
+
+        assertTrue((Boolean) applyTheme.invoke(activity, true));
+
+        assertSame(root, content.getChildAt(0));
+        assertEquals(Color.rgb(18, 18, 18),
+                ((ColorDrawable) root.getBackground()).getColor());
+        assertEquals("83", speed.getText().toString());
+        assertFalse(activity.isFinishing());
+        activity.finish();
+    }
+
+    @Test public void lightPhoneMenuPreservesSemanticIconColors() {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        ThemeSettings.setMode(context, ThemeMode.LIGHT);
+        MainActivity activity = Robolectric.buildActivity(MainActivity.class)
+                .create().get();
+        View root = ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
+        View menu = findByDescription(root, "Меню");
+        assertTrue(menu != null);
+        menu.performClick();
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        TextView exit = findText(dialog.getWindow().getDecorView(), "Выйти");
+        assertTrue(exit != null);
+        ImageView exitIcon = (ImageView) ((ViewGroup) exit.getParent()).getChildAt(0);
+
+        assertNull(exitIcon.getColorFilter());
+        dialog.dismiss();
+        activity.finish();
+    }
+
+    @Test public void phoneDarkModeUsesDarkSurfaceAndReadableText() {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        ThemeSettings.setMode(context, ThemeMode.DARK);
+        MainActivity activity = Robolectric.buildActivity(MainActivity.class)
+                .create().get();
+        View root = ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
+
+        assertEquals(Color.rgb(18, 18, 18),
+                ((ColorDrawable) root.getBackground()).getColor());
+        TextView distance = findText(root, "—");
+        assertTrue(distance != null);
+        assertEquals(Color.rgb(238, 238, 238), distance.getCurrentTextColor());
+        activity.finish();
+    }
+
+    @Test public void phoneMenuShowsStoredTheme() {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        ThemeSettings.setMode(context, ThemeMode.DARK);
+        MainActivity activity = Robolectric.buildActivity(MainActivity.class)
+                .create().get();
+        View root = ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
+
+        View menu = findByDescription(root, "Меню");
+        assertTrue(menu != null);
+        menu.performClick();
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue(dialog != null && dialog.isShowing());
+        assertTrue(findText(dialog.getWindow().getDecorView(), "Тема: Тёмная") != null);
+        assertNull(findTextStartingWith(dialog.getWindow().getDecorView(),
+                "Расстояние оповещения"));
+        dialog.dismiss();
+        activity.finish();
+    }
+
+    @Test public void automaticThemeUsesRememberedLocationAfterRestart() {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        ThemeSettings.setMode(context, ThemeMode.AUTOMATIC);
+        ThemeSettings.rememberLocation(context, 0.0, 0.0);
+        long noon = java.time.Instant.parse("2026-03-20T12:00:00Z").toEpochMilli();
+        long midnight = java.time.Instant.parse("2026-03-20T00:00:00Z").toEpochMilli();
+
+        assertFalse(ThemeSettings.isDark(context, noon));
+        assertTrue(ThemeSettings.isDark(context, midnight));
+    }
+
     @Test public void projectedServiceLoadsOfficialHostAllowlist() {
         GpsCarAppService service = Robolectric.buildService(GpsCarAppService.class)
                 .create().get();
@@ -111,8 +225,6 @@ public final class CarTemplateTest {
     }
 
     @Test public void carValueSettingsUseSharedRangesAndRussianFormatting() {
-        assertSetting(CarValueScreen.Setting.ALERT_DISTANCE,
-                AppSettings.ALERT_DISTANCE, 300, 2000, 100, "800 м");
         assertSetting(CarValueScreen.Setting.OVERSPEED_THRESHOLD,
                 AppSettings.OVERSPEED_THRESHOLD, 0, 20, 1, "10 км/ч");
         assertSetting(CarValueScreen.Setting.HUD_TRANSPARENCY,
@@ -147,7 +259,7 @@ public final class CarTemplateTest {
         assertEquals(2, hudRefreshes[0]);
     }
 
-    @Test public void carMenuShowsAutoRotateToggleAndRoutesEverySettingsScreen() {
+    @Test public void carMenuShowsThemeAndRoutesEverySettingsScreen() {
         CarContext carContext = carContext();
         carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
                 .edit().clear().commit();
@@ -160,10 +272,10 @@ public final class CarTemplateTest {
         assertEquals(Action.TYPE_BACK, template.getHeaderAction().getType());
         assertEquals(Arrays.asList(
                 "Обновить базу",
-                "Расстояние оповещения",
                 "Предел превышения скорости",
                 "Прозрачность HUD",
                 "Автоповорот карты",
+                "Тема: Автоматически",
                 "Ключ MapKit",
                 "О программе",
                 "Выход"), rowTitles(items));
@@ -171,11 +283,10 @@ public final class CarTemplateTest {
         TestScreenManager screenManager = (TestScreenManager)
                 carContext.getCarService(androidx.car.app.ScreenManager.class);
         String[] expectedTitles = {
-                "Расстояние оповещения",
                 "Предел превышения скорости",
                 "Прозрачность HUD"
         };
-        for (int index = 1; index <= 3; index++) {
+        for (int index = 1; index <= 2; index++) {
             screenManager.reset();
             click((Row) items.get(index));
             Screen pushed = screenManager.getScreensPushed().get(0);
@@ -183,7 +294,7 @@ public final class CarTemplateTest {
             assertEquals(expectedTitles[index - 1],
                     ((PaneTemplate) pushed.onGetTemplate()).getTitle().toString());
         }
-        Row autoRotate = (Row) items.get(4);
+        Row autoRotate = (Row) items.get(3);
         assertFalse(autoRotate.getToggle().isChecked());
         autoRotate.getToggle().getOnCheckedChangeDelegate().sendCheckedChange(
                 true, new OnDoneCallback() {});
@@ -191,11 +302,38 @@ public final class CarTemplateTest {
                 AppSettings.PREFERENCES, Context.MODE_PRIVATE).getBoolean(
                 AppSettings.AUTO_ROTATE_MAP, false));
         screenManager.reset();
+        click((Row) items.get(4));
+        assertTrue(screenManager.getScreensPushed().get(0) instanceof CarThemeScreen);
+        screenManager.reset();
         click((Row) items.get(5));
         assertTrue(screenManager.getScreensPushed().get(0) instanceof CarMapKeyScreen);
         screenManager.reset();
         click((Row) items.get(6));
         assertTrue(screenManager.getScreensPushed().get(0) instanceof CarAboutScreen);
+    }
+
+    @Test public void carThemeScreenPersistsSelectionAndRefreshesSurface() {
+        CarContext carContext = carContext();
+        carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().commit();
+        int[] refreshes = { 0 };
+        CarThemeScreen screen = new CarThemeScreen(carContext, () -> refreshes[0]++);
+
+        List<Item> initialItems = ((ListTemplate) screen.onGetTemplate())
+                .getSingleList().getItems();
+        assertEquals(Arrays.asList("Светлая", "Тёмная", "Автоматически"),
+                rowTitles(initialItems));
+        assertTrue(((Row) initialItems.get(2)).getTexts().get(0).toString()
+                .contains("Выбрано"));
+
+        click((Row) initialItems.get(1));
+
+        assertEquals(ThemeMode.DARK, ThemeSettings.mode(carContext));
+        assertEquals(1, refreshes[0]);
+        List<Item> updatedItems = ((ListTemplate) screen.onGetTemplate())
+                .getSingleList().getItems();
+        assertTrue(((Row) updatedItems.get(1)).getTexts().get(0).toString()
+                .contains("Выбрано"));
     }
 
     @Test public void carMenuRequestsSharedUpdateAndExplicitExit() {
@@ -708,6 +846,19 @@ public final class CarTemplateTest {
         presentation.destroy();
     }
 
+    @Test public void carHudDoesNotShowAlertAlgorithmDiagnostics() {
+        Context context = ApplicationProvider.getApplicationContext();
+        CarMapPresentation presentation =
+                new CarMapPresentation(context, null, carContext());
+        presentation.onDrivingSnapshot(new DrivingSnapshot(
+                0f, Float.NaN, -1, "", -1L, 0, 0,
+                Double.NaN, Double.NaN, Float.NaN,
+                "Поиск впереди: 1600 м", ""));
+
+        assertNull(findText(presentation.rootView(), "Поиск впереди: 1600 м"));
+        presentation.destroy();
+    }
+
     private static CarContext carContext() {
         Context context = ApplicationProvider.getApplicationContext();
         return TestCarContext.createCarContext(context);
@@ -724,6 +875,48 @@ public final class CarTemplateTest {
 
     private static void click(Action action) {
         action.getOnClickDelegate().sendClick(new OnDoneCallback() {});
+    }
+
+    private static TextView findText(View view, String text) {
+        if (view instanceof TextView && text.contentEquals(((TextView) view).getText())) {
+            return (TextView) view;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                TextView found = findText(group.getChildAt(index), text);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static TextView findTextStartingWith(View view, String prefix) {
+        if (view instanceof TextView
+                && ((TextView) view).getText().toString().startsWith(prefix)) {
+            return (TextView) view;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                TextView found = findTextStartingWith(group.getChildAt(index), prefix);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static View findByDescription(View view, String description) {
+        if (view.getContentDescription() != null
+                && description.contentEquals(view.getContentDescription())) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                View found = findByDescription(group.getChildAt(index), description);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static void click(Row row) {

@@ -63,7 +63,9 @@ public final class CarMenuScreen extends Screen {
 
     private Row row(CarMenuItem item) {
         Row.Builder row = new Row.Builder()
-                .setTitle(title(item))
+                .setTitle(item == CarMenuItem.THEME
+                        ? "Тема: " + ThemeSettings.mode(getCarContext()).title()
+                        : title(item))
                 .setImage(icon(iconResource(item)), Row.IMAGE_TYPE_ICON);
         if (item == CarMenuItem.AUTO_ROTATE_MAP) {
             boolean enabled = getCarContext().getSharedPreferences(
@@ -89,10 +91,6 @@ public final class CarMenuScreen extends Screen {
             case UPDATE_DATABASE:
                 updateController.requestUpdate();
                 break;
-            case ALERT_DISTANCE:
-                getScreenManager().push(new CarValueScreen(getCarContext(),
-                        CarValueScreen.Setting.ALERT_DISTANCE, surfaceController));
-                break;
             case OVERSPEED_THRESHOLD:
                 getScreenManager().push(new CarValueScreen(getCarContext(),
                         CarValueScreen.Setting.OVERSPEED_THRESHOLD, surfaceController));
@@ -102,6 +100,10 @@ public final class CarMenuScreen extends Screen {
                         CarValueScreen.Setting.HUD_TRANSPARENCY, surfaceController));
                 break;
             case AUTO_ROTATE_MAP:
+                break;
+            case THEME:
+                getScreenManager().push(new CarThemeScreen(
+                        getCarContext(), surfaceController));
                 break;
             case MAPKIT_KEY:
                 getScreenManager().push(new CarMapKeyScreen(getCarContext()));
@@ -126,14 +128,14 @@ public final class CarMenuScreen extends Screen {
         switch (item) {
             case UPDATE_DATABASE:
                 return R.drawable.ic_refresh;
-            case ALERT_DISTANCE:
-                return R.drawable.ic_distance;
             case OVERSPEED_THRESHOLD:
                 return R.drawable.ic_speed_limit;
             case HUD_TRANSPARENCY:
                 return R.drawable.ic_opacity;
             case AUTO_ROTATE_MAP:
                 return R.drawable.ic_navigation;
+            case THEME:
+                return R.drawable.ic_theme;
             case MAPKIT_KEY:
                 return R.drawable.ic_key;
             case ABOUT:
@@ -149,14 +151,14 @@ public final class CarMenuScreen extends Screen {
         switch (item) {
             case UPDATE_DATABASE:
                 return "Обновить базу";
-            case ALERT_DISTANCE:
-                return "Расстояние оповещения";
             case OVERSPEED_THRESHOLD:
                 return "Предел превышения скорости";
             case HUD_TRANSPARENCY:
                 return "Прозрачность HUD";
             case AUTO_ROTATE_MAP:
                 return "Автоповорот карты";
+            case THEME:
+                return "Тема";
             case MAPKIT_KEY:
                 return "Ключ MapKit";
             case ABOUT:

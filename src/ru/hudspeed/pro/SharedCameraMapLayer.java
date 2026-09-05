@@ -207,6 +207,14 @@ public final class SharedCameraMapLayer {
         }, "visible-camera-load").start();
     }
 
+    public void setNightMode(boolean enabled) {
+        com.yandex.mapkit.map.Map activeMap = map;
+        if (!destroyed && activeMap != null
+                && activeMap.isNightModeEnabled() != enabled) {
+            activeMap.setNightModeEnabled(enabled);
+        }
+    }
+
     /** Updates the position and suppresses redundant following below 1 km/h. */
     public void updateCurrentLocation(double latitude, double longitude, float speedKmh,
                                       float headingDegrees) {
@@ -236,14 +244,26 @@ public final class SharedCameraMapLayer {
     }
 
     public void zoomBy(float delta) {
+        zoomBy(delta, new Animation(Animation.Type.SMOOTH, 0.35f));
+    }
+
+    public void zoomByImmediately(float delta) {
+        zoomBy(delta, null);
+    }
+
+    private void zoomBy(float delta, Animation animation) {
         com.yandex.mapkit.map.Map activeMap = map;
         if (destroyed || activeMap == null) return;
         pauseFollowing();
         CameraPosition current = activeMap.getCameraPosition();
         float zoom = Math.max(2f, Math.min(21f, current.getZoom() + delta));
-        activeMap.move(new CameraPosition(current.getTarget(), zoom,
-                        current.getAzimuth(), current.getTilt()),
-                new Animation(Animation.Type.SMOOTH, 0.35f));
+        CameraPosition next = new CameraPosition(current.getTarget(), zoom,
+                current.getAzimuth(), current.getTilt());
+        if (animation == null) {
+            activeMap.move(next);
+        } else {
+            activeMap.move(next, animation);
+        }
     }
 
     public void pauseFollowing() {
@@ -638,7 +658,7 @@ public final class SharedCameraMapLayer {
                 .setAnchor(new android.graphics.PointF(0.5f, 0.5f))
                 .setRotationType(RotationType.ROTATE)
                 .setFlat(true)
-                .setScale(1f)
+                .setScale(0.8f)
                 .setZIndex(100f);
     }
 

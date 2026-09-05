@@ -19,6 +19,8 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseTypes.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\SpeedControlRules.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\AppSettings.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\ThemeMode.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\ThemeResolver.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\DrivingSnapshot.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\DrivingHudPresentation.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\StrelkaAlertAlgorithm.java") `

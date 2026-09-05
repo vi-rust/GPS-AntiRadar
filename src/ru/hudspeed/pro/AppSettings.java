@@ -2,18 +2,16 @@ package ru.gpsantiradar.app;
 
 public final class AppSettings {
     public static final String PREFERENCES = "settings";
-    public static final String ALERT_DISTANCE = "alert_distance";
     public static final String OVERSPEED_THRESHOLD = "overspeed_threshold_kmh";
     public static final String MAPKIT_KEY = "yandex_mapkit_key";
     public static final String HUD_TRANSPARENCY = "hud_transparency";
     public static final String AUTO_ROTATE_MAP = "auto_rotate_map";
+    public static final String THEME_MODE = "theme_mode";
+    public static final String THEME_LATITUDE = "theme_latitude";
+    public static final String THEME_LONGITUDE = "theme_longitude";
     public static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
             "radarbase_last_successful_download";
 
-    public static final int DEFAULT_ALERT_DISTANCE_METERS = 800;
-    public static final int MIN_ALERT_DISTANCE_METERS = 300;
-    public static final int MAX_ALERT_DISTANCE_METERS = 2000;
-    public static final int ALERT_DISTANCE_STEP_METERS = 100;
     public static final int DEFAULT_OVERSPEED_THRESHOLD_KMH = 10;
     public static final int MIN_OVERSPEED_THRESHOLD_KMH = 0;
     public static final int MAX_OVERSPEED_THRESHOLD_KMH = 20;
@@ -25,17 +23,6 @@ public final class AppSettings {
     public static final int HUD_TRANSPARENCY_STEP_PERCENT = 5;
 
     private AppSettings() {}
-
-    public static int clampAlertDistance(int value) {
-        return floorToStep(value, MIN_ALERT_DISTANCE_METERS,
-                MAX_ALERT_DISTANCE_METERS, ALERT_DISTANCE_STEP_METERS);
-    }
-
-    public static int adjustAlertDistance(int value, int direction) {
-        int normalized = clampAlertDistance(value);
-        return clampAlertDistance(normalized
-                + Integer.signum(direction) * ALERT_DISTANCE_STEP_METERS);
-    }
 
     public static int clampOverspeedThreshold(int value) {
         return Math.max(MIN_OVERSPEED_THRESHOLD_KMH,

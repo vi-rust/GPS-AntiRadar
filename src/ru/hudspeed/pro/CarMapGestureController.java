@@ -11,77 +11,128 @@ public final class CarMapGestureController {
         void onMapClick(Point point);
     }
 
+    interface GestureTarget {
+        void zoomBy(float delta, boolean animated);
+        void recenter();
+        void pauseFollowing();
+        void panBy(float offsetX, float offsetY, boolean animated);
+        Point pointAt(float x, float y);
+    }
+
     private static final float FLING_SECONDS = 0.12f;
 
-    private final MapWindow mapWindow;
-    private final SharedCameraMapLayer mapLayer;
+    private final GestureTarget target;
     private final ClickListener clickListener;
-    private boolean panMode;
 
     public CarMapGestureController(MapWindow mapWindow,
             SharedCameraMapLayer mapLayer, ClickListener clickListener) {
-        this.mapWindow = mapWindow;
-        this.mapLayer = mapLayer;
+        this(new MapKitGestureTarget(mapWindow, mapLayer), clickListener);
+    }
+
+    CarMapGestureController(GestureTarget target, ClickListener clickListener) {
+        if (target == null) throw new IllegalArgumentException("target is required");
+        this.target = target;
         this.clickListener = clickListener;
     }
 
+    static ScreenPoint translatedCameraTarget(ScreenPoint displayedTarget,
+            float offsetX, float offsetY) {
+        if (displayedTarget == null) return null;
+        return new ScreenPoint(displayedTarget.getX() + offsetX,
+                displayedTarget.getY() + offsetY);
+    }
+
     public void zoomBy(float delta) {
-        mapLayer.zoomBy(delta);
+        target.zoomBy(delta, true);
     }
 
     public void recenter() {
-        mapLayer.moveToCurrentLocation();
+        target.recenter();
     }
 
     public void setPanMode(boolean enabled) {
-        panMode = enabled;
-        if (enabled) mapLayer.pauseFollowing();
+        if (enabled) target.pauseFollowing();
     }
 
     public void onScale(float focusX, float focusY, float scaleFactor) {
         if (!Float.isFinite(scaleFactor) || scaleFactor <= 0f) return;
         float delta = (float) (Math.log(scaleFactor) / Math.log(2.0));
         if (Float.isFinite(delta) && Math.abs(delta) > 0.001f) {
-            mapLayer.zoomBy(delta);
+            target.zoomBy(delta, false);
         }
     }
 
     public void onScroll(float distanceX, float distanceY) {
-        if (!panMode) return;
-        moveCenterToScreenOffset(distanceX, distanceY, null);
+        moveCenterToScreenOffset(distanceX, distanceY, false);
     }
 
     public void onFling(float velocityX, float velocityY) {
-        if (!panMode) return;
         moveCenterToScreenOffset(-velocityX * FLING_SECONDS,
                 -velocityY * FLING_SECONDS,
-                new Animation(Animation.Type.SMOOTH, 0.28f));
+                true);
     }
 
     public void onClick(float x, float y) {
         if (!Float.isFinite(x) || !Float.isFinite(y)) return;
-        Point point = mapWindow.screenToWorld(new ScreenPoint(x, y));
+        Point point = target.pointAt(x, y);
         if (point != null && clickListener != null) clickListener.onMapClick(point);
     }
 
     private void moveCenterToScreenOffset(float offsetX, float offsetY,
-            Animation animation) {
-        if (!Float.isFinite(offsetX) || !Float.isFinite(offsetY)) return;
-        com.yandex.mapkit.map.Map map = mapWindow.getMap();
-        if (map == null || !map.isValid()) return;
-        float centerX = mapWindow.width() / 2f;
-        float centerY = mapWindow.height() / 2f;
-        Point target = mapWindow.screenToWorld(
-                new ScreenPoint(centerX + offsetX, centerY + offsetY));
-        if (target == null) return;
-        mapLayer.pauseFollowing();
-        CameraPosition current = map.getCameraPosition();
-        CameraPosition next = new CameraPosition(target, current.getZoom(),
-                current.getAzimuth(), current.getTilt());
-        if (animation == null) {
-            map.move(next);
-        } else {
-            map.move(next, animation);
+            boolean animated) {
+        target.panBy(offsetX, offsetY, animated);
+    }
+
+    private static final class MapKitGestureTarget implements GestureTarget {
+        private final MapWindow mapWindow;
+        private final SharedCameraMapLayer mapLayer;
+
+        MapKitGestureTarget(MapWindow mapWindow, SharedCameraMapLayer mapLayer) {
+            if (mapWindow == null) throw new IllegalArgumentException("mapWindow is required");
+            if (mapLayer == null) throw new IllegalArgumentException("mapLayer is required");
+            this.mapWindow = mapWindow;
+            this.mapLayer = mapLayer;
+        }
+
+        @Override public void zoomBy(float delta, boolean animated) {
+            if (animated) {
+                mapLayer.zoomBy(delta);
+            } else {
+                mapLayer.zoomByImmediately(delta);
+            }
+        }
+
+        @Override public void recenter() {
+            mapLayer.moveToCurrentLocation();
+        }
+
+        @Override public void pauseFollowing() {
+            mapLayer.pauseFollowing();
+        }
+
+        @Override public Point pointAt(float x, float y) {
+            return mapWindow.screenToWorld(new ScreenPoint(x, y));
+        }
+
+        @Override public void panBy(float offsetX, float offsetY, boolean animated) {
+            if (!Float.isFinite(offsetX) || !Float.isFinite(offsetY)) return;
+            com.yandex.mapkit.map.Map map = mapWindow.getMap();
+            if (map == null || !map.isValid()) return;
+            CameraPosition current = map.getCameraPosition();
+            ScreenPoint displayedTarget = mapWindow.worldToScreen(current.getTarget());
+            ScreenPoint translatedTarget = translatedCameraTarget(
+                    displayedTarget, offsetX, offsetY);
+            if (translatedTarget == null) return;
+            Point target = mapWindow.screenToWorld(translatedTarget);
+            if (target == null) return;
+            mapLayer.pauseFollowing();
+            CameraPosition next = new CameraPosition(target, current.getZoom(),
+                    current.getAzimuth(), current.getTilt());
+            if (!animated) {
+                map.move(next);
+            } else {
+                map.move(next, new Animation(Animation.Type.SMOOTH, 0.28f));
+            }
         }
     }
 }

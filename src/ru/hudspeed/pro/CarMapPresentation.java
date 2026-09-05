@@ -26,13 +26,12 @@ public final class CarMapPresentation {
 
     private final Context context;
     private final GpsAntiRadarApplication application;
-    private final CarContext carContext;
     private final FrameLayout root;
     private final LinearLayout hudPanel;
     private final TextView speedView;
+    private final TextView unitView;
     private final TextView distanceView;
     private final TextView cameraView;
-    private final TextView stateView;
     private final TextView hintView;
     private MapView mapView;
     private SharedCameraMapLayer mapLayer;
@@ -42,14 +41,24 @@ public final class CarMapPresentation {
     private boolean mapKitAcquired;
     private boolean mapStarted;
     private boolean destroyed;
+    private boolean darkTheme;
+    private boolean themeApplied;
+    private final Runnable themeRefresh = new Runnable() {
+        @Override public void run() {
+            if (destroyed) return;
+            applyTheme(ThemeSettings.isDark(context));
+            if (!destroyed) root.postDelayed(this, 60_000L);
+        }
+    };
 
     public CarMapPresentation(Context context, GpsAntiRadarApplication application,
             CarContext carContext) {
         this.context = context;
         this.application = application;
-        this.carContext = carContext;
+        darkTheme = ThemeSettings.isDark(context);
         root = new FrameLayout(context);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(darkTheme
+                ? Color.rgb(18, 18, 18) : Color.rgb(242, 244, 246));
 
         hudPanel = new LinearLayout(context);
         hudPanel.setOrientation(LinearLayout.VERTICAL);
@@ -66,13 +75,12 @@ public final class CarMapPresentation {
         speedView = text("0", 46, GREEN, Typeface.BOLD);
         speedView.setIncludeFontPadding(false);
         hudPanel.addView(speedView);
-        hudPanel.addView(text("км/ч", 13, Color.DKGRAY, Typeface.NORMAL));
+        unitView = text("км/ч", 13, Color.DKGRAY, Typeface.NORMAL);
+        hudPanel.addView(unitView);
         distanceView = text("—", 24, Color.rgb(30, 30, 30), Typeface.BOLD);
         hudPanel.addView(distanceView);
         cameraView = text("Объектов впереди нет", 13, GREEN, Typeface.BOLD);
         hudPanel.addView(cameraView);
-        stateView = text("", 12, Color.DKGRAY, Typeface.NORMAL);
-        hudPanel.addView(stateView);
 
         hintView = text("", 13, Color.BLACK, Typeface.BOLD);
         hintView.setPadding(dp(10), dp(7), dp(10), dp(7));
@@ -84,7 +92,6 @@ public final class CarMapPresentation {
         hintParams.setMargins(0, dp(8), 0, 0);
         root.addView(hintView, hintParams);
 
-        refreshHudTransparency();
         onCarConfigurationChanged();
     }
 
@@ -99,6 +106,8 @@ public final class CarMapPresentation {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT));
             startMap();
+            root.removeCallbacks(themeRefresh);
+            root.postDelayed(themeRefresh, 60_000L);
         } catch (RuntimeException | LinkageError error) {
             destroy();
             throw error;
@@ -111,13 +120,20 @@ public final class CarMapPresentation {
 
     public void onDrivingSnapshot(DrivingSnapshot snapshot) {
         if (destroyed || snapshot == null) return;
+        if (snapshot.hasLocation()) {
+            ThemeSettings.rememberLocation(context,
+                    snapshot.latitude, snapshot.longitude);
+            applyTheme(ThemeSettings.isDark(context, System.currentTimeMillis(),
+                    snapshot.latitude, snapshot.longitude));
+        } else {
+            applyTheme(ThemeSettings.isDark(context));
+        }
         DrivingHudPresentation presentation = DrivingHudPresentation.from(snapshot);
         speedView.setText(presentation.speedText);
         speedView.setTextColor(presentation.speedColor);
         distanceView.setText(presentation.distanceText);
         cameraView.setText(presentation.cameraText);
         cameraView.setTextColor(presentation.speedColor);
-        stateView.setText(snapshot.alertState);
         if (snapshot.hasLocation() && mapLayer != null) {
             mapLayer.updateCurrentLocation(
                     snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
@@ -175,12 +191,7 @@ public final class CarMapPresentation {
 
     public void onCarConfigurationChanged() {
         if (destroyed) return;
-        boolean dark = carContext.isDarkMode();
-        int primary = dark ? Color.WHITE : Color.rgb(30, 30, 30);
-        int secondary = dark ? Color.LTGRAY : Color.DKGRAY;
-        distanceView.setTextColor(primary);
-        stateView.setTextColor(secondary);
-        refreshHudTransparency();
+        applyTheme(ThemeSettings.isDark(context));
     }
 
     public void refreshHudTransparency() {
@@ -190,8 +201,7 @@ public final class CarMapPresentation {
                         .getInt(AppSettings.HUD_TRANSPARENCY,
                                 AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
         int alpha = Math.round(255f * (100 - percent) / 100f);
-        boolean dark = carContext.isDarkMode();
-        int base = dark ? Color.rgb(28, 28, 28) : Color.WHITE;
+        int base = darkTheme ? Color.rgb(28, 30, 32) : Color.WHITE;
         hudPanel.setBackground(roundedBackground(
                 Color.argb(alpha, Color.red(base), Color.green(base), Color.blue(base))));
     }
@@ -199,6 +209,7 @@ public final class CarMapPresentation {
     public void destroy() {
         if (destroyed) return;
         destroyed = true;
+        root.removeCallbacks(themeRefresh);
         if (mapLayer != null) {
             try {
                 mapLayer.destroy();
@@ -255,6 +266,7 @@ public final class CarMapPresentation {
                         hintView.setVisibility(View.VISIBLE);
                     }
                 });
+        mapLayer.setNightMode(darkTheme);
         gestureController = new CarMapGestureController(
                 mapWindow, mapLayer, new CarMapGestureController.ClickListener() {
                     @Override public void onMapClick(Point point) {
@@ -262,6 +274,23 @@ public final class CarMapPresentation {
                     }
                 });
         mapLayer.loadInitial(true);
+    }
+
+    private void applyTheme(boolean dark) {
+        if (destroyed || themeApplied && darkTheme == dark) return;
+        darkTheme = dark;
+        themeApplied = true;
+        int primary = dark ? Color.rgb(238, 238, 238) : Color.rgb(30, 30, 30);
+        int secondary = dark ? Color.rgb(185, 190, 195) : Color.DKGRAY;
+        int hintSurface = dark ? Color.rgb(32, 35, 38) : Color.WHITE;
+        root.setBackgroundColor(dark
+                ? Color.rgb(18, 18, 18) : Color.rgb(242, 244, 246));
+        unitView.setTextColor(secondary);
+        distanceView.setTextColor(primary);
+        hintView.setTextColor(primary);
+        hintView.setBackground(roundedBackground(hintSurface));
+        refreshHudTransparency();
+        if (mapLayer != null) mapLayer.setNightMode(dark);
     }
 
     private void applyStableArea() {
