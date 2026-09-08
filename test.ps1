@@ -30,6 +30,9 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\ProcessLaunchGuard.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\MapKitLifecycle.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\CarSurfaceSpec.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\CarStartupDecision.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerHitTest.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\CameraHintFormatter.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\CarSurfaceSpec.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\CarMenuItem.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseUpdateSingleFlight.java") `
@@ -39,6 +42,7 @@ Copy-Item $GsonJar.FullName $LocalGson -Force
     (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerLayout.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\MapMarkerEntityDiff.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\MapOrientation.java") `
+    (Join-Path $Project "src\ru\hudspeed\pro\MapVisualStyle.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\HeadingSelection.java") `
     (Join-Path $Project "src\ru\hudspeed\pro\RadarBaseParser.java") `
     (Join-Path $Project "tests\ParserGeoTest.java")

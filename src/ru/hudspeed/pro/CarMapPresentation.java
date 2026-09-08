@@ -1,10 +1,13 @@
 package ru.gpsantiradar.app;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -23,9 +26,12 @@ import com.yandex.mapkit.mapview.MapView;
 public final class CarMapPresentation {
     private static final String TAG = "CarMapPresentation";
     private static final int GREEN = Color.rgb(0, 166, 82);
+    private static final long HINT_VISIBLE_MS = 3000L;
 
     private final Context context;
     private final GpsAntiRadarApplication application;
+    private final SharedPreferences preferences;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final FrameLayout root;
     private final LinearLayout hudPanel;
     private final TextView speedView;
@@ -43,6 +49,19 @@ public final class CarMapPresentation {
     private boolean destroyed;
     private boolean darkTheme;
     private boolean themeApplied;
+    private boolean settingsRegistered;
+    private boolean databaseEmpty;
+    private boolean trackingStopped;
+    private int hintGeneration;
+    private DrivingSnapshot latestSnapshot = DrivingSnapshot.idle();
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsListener =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override public void onSharedPreferenceChanged(
+                        SharedPreferences sharedPreferences, String key) {
+                    if (destroyed) return;
+                    mainHandler.post(() -> applySettingChange(key));
+                }
+            };
     private final Runnable themeRefresh = new Runnable() {
         @Override public void run() {
             if (destroyed) return;
@@ -55,6 +74,8 @@ public final class CarMapPresentation {
             CarContext carContext) {
         this.context = context;
         this.application = application;
+        preferences = context.getSharedPreferences(
+                AppSettings.PREFERENCES, Context.MODE_PRIVATE);
         darkTheme = ThemeSettings.isDark(context);
         root = new FrameLayout(context);
         root.setBackgroundColor(darkTheme
@@ -100,6 +121,7 @@ public final class CarMapPresentation {
             throw new IllegalStateException("Car map presentation is destroyed");
         }
         if (mapView != null) return;
+        registerSettingsListener();
         try {
             mapView = new MapView(context);
             root.addView(mapView, 0, new FrameLayout.LayoutParams(
@@ -120,6 +142,8 @@ public final class CarMapPresentation {
 
     public void onDrivingSnapshot(DrivingSnapshot snapshot) {
         if (destroyed || snapshot == null) return;
+        latestSnapshot = snapshot;
+        trackingStopped = false;
         if (snapshot.hasLocation()) {
             ThemeSettings.rememberLocation(context,
                     snapshot.latitude, snapshot.longitude);
@@ -128,17 +152,48 @@ public final class CarMapPresentation {
         } else {
             applyTheme(ThemeSettings.isDark(context));
         }
-        DrivingHudPresentation presentation = DrivingHudPresentation.from(snapshot);
+        renderHud(snapshot);
+        if (mapLayer != null) {
+            mapLayer.updateActiveCamera(snapshot.cameraId);
+            if (snapshot.hasLocation()) {
+                mapLayer.updateCurrentLocation(
+                        snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
+                        snapshot.headingDegrees);
+            }
+        }
+    }
+
+    private void renderHud(DrivingSnapshot snapshot) {
+        int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
+                preferences.getInt(AppSettings.OVERSPEED_THRESHOLD,
+                        AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
+        DrivingHudPresentation presentation = DrivingHudPresentation.from(
+                snapshot, overspeedThresholdKmh);
         speedView.setText(presentation.speedText);
         speedView.setTextColor(presentation.speedColor);
         distanceView.setText(presentation.distanceText);
-        cameraView.setText(presentation.cameraText);
+        cameraView.setText(databaseEmpty && !presentation.hasActiveObject
+                ? "База объектов пуста — обновите RadarBase"
+                : presentation.cameraText);
         cameraView.setTextColor(presentation.speedColor);
-        if (snapshot.hasLocation() && mapLayer != null) {
-            mapLayer.updateCurrentLocation(
-                    snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
-                    snapshot.headingDegrees);
-        }
+    }
+
+    public void onDatabaseCount(int count) {
+        if (destroyed || count < 0) return;
+        databaseEmpty = count == 0;
+        if (!trackingStopped) renderHud(latestSnapshot);
+    }
+
+    public void onTrackingStopped() {
+        if (destroyed) return;
+        trackingStopped = true;
+        latestSnapshot = DrivingSnapshot.idle();
+        speedView.setText("0");
+        speedView.setTextColor(GREEN);
+        distanceView.setText("—");
+        cameraView.setText("Антирадар остановлен");
+        cameraView.setTextColor(GREEN);
+        if (mapLayer != null) mapLayer.updateActiveCamera(-1L);
     }
 
     public void refreshVisible() {
@@ -197,9 +252,8 @@ public final class CarMapPresentation {
     public void refreshHudTransparency() {
         if (destroyed) return;
         int percent = AppSettings.clampHudTransparency(
-                context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
-                        .getInt(AppSettings.HUD_TRANSPARENCY,
-                                AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
+                preferences.getInt(AppSettings.HUD_TRANSPARENCY,
+                        AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
         int alpha = Math.round(255f * (100 - percent) / 100f);
         int base = darkTheme ? Color.rgb(28, 30, 32) : Color.WHITE;
         hudPanel.setBackground(roundedBackground(
@@ -210,6 +264,7 @@ public final class CarMapPresentation {
         if (destroyed) return;
         destroyed = true;
         root.removeCallbacks(themeRefresh);
+        unregisterSettingsListener();
         if (mapLayer != null) {
             try {
                 mapLayer.destroy();
@@ -259,17 +314,27 @@ public final class CarMapPresentation {
 
                     @Override public void onMarkerPresentationChanged() {
                         hintView.setVisibility(View.GONE);
+                        hintGeneration++;
                     }
 
                     @Override public void onCameraTapped(CameraPoint camera, Point position) {
-                        hintView.setText(camera.typeName());
+                        hintView.setText(CameraHintFormatter.format(camera));
                         hintView.setVisibility(View.VISIBLE);
+                        final int generation = ++hintGeneration;
+                        root.postDelayed(new Runnable() {
+                            @Override public void run() {
+                                if (!destroyed && generation == hintGeneration) {
+                                    hintView.setVisibility(View.GONE);
+                                }
+                            }
+                        }, HINT_VISIBLE_MS);
                     }
                 });
         mapLayer.setNightMode(darkTheme);
         gestureController = new CarMapGestureController(
                 mapWindow, mapLayer, new CarMapGestureController.ClickListener() {
                     @Override public void onMapClick(Point point) {
+                        hintGeneration++;
                         hintView.setVisibility(View.GONE);
                     }
                 });
@@ -291,6 +356,29 @@ public final class CarMapPresentation {
         hintView.setBackground(roundedBackground(hintSurface));
         refreshHudTransparency();
         if (mapLayer != null) mapLayer.setNightMode(dark);
+    }
+
+    private void registerSettingsListener() {
+        if (settingsRegistered) return;
+        preferences.registerOnSharedPreferenceChangeListener(settingsListener);
+        settingsRegistered = true;
+    }
+
+    private void unregisterSettingsListener() {
+        if (!settingsRegistered) return;
+        preferences.unregisterOnSharedPreferenceChangeListener(settingsListener);
+        settingsRegistered = false;
+    }
+
+    private void applySettingChange(String key) {
+        if (destroyed || key == null) return;
+        if (AppSettings.HUD_TRANSPARENCY.equals(key)) {
+            refreshHudTransparency();
+        } else if (AppSettings.THEME_MODE.equals(key)) {
+            applyTheme(ThemeSettings.isDark(context));
+        } else if (AppSettings.OVERSPEED_THRESHOLD.equals(key) && !trackingStopped) {
+            renderHud(latestSnapshot);
+        }
     }
 
     private void applyStableArea() {

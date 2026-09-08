@@ -45,7 +45,13 @@ public final class CarMapKeyScreen extends Screen {
         }
         getCarContext().getSharedPreferences(
                 AppSettings.PREFERENCES, Context.MODE_PRIVATE)
-                .edit().putString(AppSettings.MAPKIT_KEY, key).commit();
+                .edit()
+                .putString(AppSettings.MAPKIT_KEY, key)
+                .remove(AppSettings.MAPKIT_PENDING)
+                .putBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, true)
+                .putBoolean(AppSettings.MAPKIT_MARKER_FIX, true)
+                .putBoolean(AppSettings.MAPKIT_KEY_REENTRY, true)
+                .commit();
         CarToast.makeText(getCarContext(),
                 "Ключ сохранён. Полностью перезапустите приложение.",
                 CarToast.LENGTH_LONG).show();

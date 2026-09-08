@@ -31,6 +31,8 @@ public final class CarSurfaceController implements SurfaceCallback {
 
     interface SurfaceResource {
         void onDrivingSnapshot(DrivingSnapshot snapshot);
+        default void onDatabaseCount(int count) {}
+        default void onTrackingStopped() {}
         void refreshVisible();
         void zoomBy(float delta);
         void recenter();
@@ -53,6 +55,8 @@ public final class CarSurfaceController implements SurfaceCallback {
     private Surface activeSurface;
     private CarSurfaceSpec activeSpec;
     private DrivingSnapshot latestSnapshot = DrivingSnapshot.idle();
+    private int latestDatabaseCount = -1;
+    private boolean trackingStopped;
     private boolean panMode;
     private boolean destroyed;
 
@@ -135,6 +139,8 @@ public final class CarSurfaceController implements SurfaceCallback {
             created.onCarConfigurationChanged();
             created.setPanMode(panMode);
             created.onDrivingSnapshot(latestSnapshot);
+            if (latestDatabaseCount >= 0) created.onDatabaseCount(latestDatabaseCount);
+            if (trackingStopped) created.onTrackingStopped();
         } catch (RuntimeException | LinkageError error) {
             if (surfaceResource != null && activeSurface == surface) {
                 releaseResource(true);
@@ -203,9 +209,23 @@ public final class CarSurfaceController implements SurfaceCallback {
     public synchronized void onDrivingSnapshot(DrivingSnapshot snapshot) {
         if (destroyed || snapshot == null) return;
         latestSnapshot = snapshot;
+        trackingStopped = false;
         if (surfaceResource != null) {
             surfaceResource.onDrivingSnapshot(snapshot);
         }
+    }
+
+    public synchronized void onDatabaseCount(int count) {
+        if (destroyed || count < 0) return;
+        latestDatabaseCount = count;
+        if (surfaceResource != null) surfaceResource.onDatabaseCount(count);
+    }
+
+    public synchronized void onTrackingStopped() {
+        if (destroyed) return;
+        trackingStopped = true;
+        latestSnapshot = DrivingSnapshot.idle();
+        if (surfaceResource != null) surfaceResource.onTrackingStopped();
     }
 
     public synchronized void refreshVisible() {
@@ -220,10 +240,10 @@ public final class CarSurfaceController implements SurfaceCallback {
         }
     }
 
-    public synchronized void recenter() {
-        if (!destroyed && surfaceResource != null) {
-            surfaceResource.recenter();
-        }
+    public synchronized boolean recenter() {
+        if (destroyed || surfaceResource == null || !latestSnapshot.hasLocation()) return false;
+        surfaceResource.recenter();
+        return true;
     }
 
     public synchronized void setPanMode(boolean enabled) {
@@ -347,6 +367,14 @@ public final class CarSurfaceController implements SurfaceCallback {
 
         @Override public void onDrivingSnapshot(DrivingSnapshot snapshot) {
             if (!released) content.onDrivingSnapshot(snapshot);
+        }
+
+        @Override public void onDatabaseCount(int count) {
+            if (!released) content.onDatabaseCount(count);
+        }
+
+        @Override public void onTrackingStopped() {
+            if (!released) content.onTrackingStopped();
         }
 
         @Override public void refreshVisible() {

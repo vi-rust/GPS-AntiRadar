@@ -23,8 +23,13 @@ public final class DrivingHudPresentation {
     }
 
     public static DrivingHudPresentation from(DrivingSnapshot snapshot) {
+        return from(snapshot, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH);
+    }
+
+    public static DrivingHudPresentation from(DrivingSnapshot snapshot,
+                                               int overspeedThresholdKmh) {
         boolean hasActiveObject = snapshot.hasObject();
-        int speedColor = color(snapshot, hasActiveObject);
+        int speedColor = color(snapshot, hasActiveObject, overspeedThresholdKmh);
         String speedText = Integer.toString(Math.round(snapshot.speedKmh));
         String distanceText = snapshot.distanceMeters < 0 ? "—"
                 : formatDistance(snapshot.distanceMeters);
@@ -35,13 +40,16 @@ public final class DrivingHudPresentation {
                 speedColor, hasActiveObject);
     }
 
-    private static int color(DrivingSnapshot snapshot, boolean hasActiveObject) {
-        if (!hasActiveObject) return COLOR_GREEN;
-        if (snapshot.speedLimitKmh > 0 && snapshot.speedKmh > snapshot.speedLimitKmh) {
-            return COLOR_OVERSPEED;
+    private static int color(DrivingSnapshot snapshot, boolean hasActiveObject,
+                             int overspeedThresholdKmh) {
+        if (!hasActiveObject || snapshot.distanceMeters > snapshot.alertDistanceMeters
+                || snapshot.speedLimitKmh <= 0
+                || snapshot.speedKmh < snapshot.speedLimitKmh) {
+            return COLOR_GREEN;
         }
-        return snapshot.distanceMeters <= snapshot.alertDistanceMeters
-                ? COLOR_ALERT : COLOR_GREEN;
+        int threshold = AppSettings.clampOverspeedThreshold(overspeedThresholdKmh);
+        return snapshot.speedKmh >= snapshot.speedLimitKmh + threshold
+                ? COLOR_OVERSPEED : COLOR_ALERT;
     }
 
     private static String formatDistance(int meters) {

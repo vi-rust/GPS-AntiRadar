@@ -1,6 +1,7 @@
 package ru.gpsantiradar.app;
 
 import androidx.car.app.CarContext;
+import androidx.car.app.CarToast;
 import androidx.car.app.Screen;
 import androidx.car.app.ScreenManager;
 import androidx.car.app.model.Action;
@@ -52,7 +53,11 @@ public final class CarMapScreen extends Screen {
                 .addAction(iconAction(R.drawable.ic_car_location,
                         new Runnable() {
                             @Override public void run() {
-                                surfaceController.recenter();
+                                if (!surfaceController.recenter()) {
+                                    CarToast.makeText(getCarContext(),
+                                            "Дождитесь определения координат GPS",
+                                            CarToast.LENGTH_SHORT).show();
+                                }
                             }
                         }))
                 .build();

@@ -45,7 +45,7 @@
             android:name=".TrackingService"
             android:enabled="true"
             android:exported="false"
-            android:stopWithTask="true"
+            android:stopWithTask="false"
             android:foregroundServiceType="location" />
 
         <service

@@ -65,8 +65,11 @@ if ($sharedMapLayer -match 'Math\.max\(0\.02,') {
 Assert-Contains $sharedMapLayer 'MapMarkerEntityDiff\.between' "shared map rendering must preserve world-anchored entity diffing"
 Assert-Contains $sharedMapLayer 'interface Host' "shared map rendering must expose host callbacks"
 Assert-Contains $sharedMapLayer 'void onMarkerPresentationChanged\(\)' "marker changes must explicitly invalidate the host presentation"
+Assert-Contains $sharedMapLayer 'boolean tapCameraAt\(float x, float y\)' "shared map layer must hit-test projected Android Auto clicks"
+Assert-Contains $sharedMapLayer 'MapMarkerHitTest\.nearest' "projected marker clicks must use the pure nearest-marker hit test"
 foreach ($method in @("loadInitial", "refreshVisible", "updateCurrentLocation",
-        "moveToCurrentLocation", "zoomBy", "pauseFollowing", "resumeFollowing", "destroy")) {
+        "updateActiveCamera", "moveToCurrentLocation", "zoomBy", "pauseFollowing",
+        "resumeFollowing", "destroy")) {
     Assert-Contains $sharedMapLayer ([regex]::Escape("void $method(")) "SharedCameraMapLayer must expose $method"
 }
 Assert-Contains $sharedMapLayer 'removeCameraListener' "destroy must remove the layer camera listener"
@@ -79,6 +82,9 @@ Assert-Contains $sharedMapLayer 'resourceContext\.getDrawable\(' "marker drawabl
 Assert-Contains $sharedMapLayer 'updateCurrentLocation\(double latitude, double longitude, float speedKmh,\s*float headingDegrees\)' "location updates must include movement speed and heading"
 Assert-Contains $sharedMapLayer 'mapCenteredOnGps && speedKmh < 1f' "stationary updates below 1 km/h must not keep moving the followed map"
 Assert-Contains $activity 'snapshot\.latitude, snapshot\.longitude, snapshot\.speedKmh,\s*snapshot\.headingDegrees' "phone map following must use snapshot speed and heading"
+Assert-Contains $activity 'cameraMapLayer\.updateActiveCamera\(snapshot\.cameraId\)' "phone map must style the already selected camera as active"
+Assert-Contains $sharedMapLayer 'MapVisualStyle\.coverage\(\s*baseColor, camera\.id, activeCameraId\)' "coverage colors must preserve the object type color and depend on the selected camera id"
+Assert-Contains $sharedMapLayer 'refreshCoverageStyle\(previousActiveCameraId\)[\s\S]*refreshCoverageStyle\(activeCameraId\)' "changing the selected camera must restyle both old and new coverage"
 Assert-Contains $sharedMapLayer 'locationPlacemark\.setDirection\(lastHeadingDegrees\)' "the current-location arrow must follow the movement heading"
 Assert-Contains $sharedMapLayer 'AppSettings\.AUTO_ROTATE_MAP' "map auto-rotation must use the shared persisted setting"
 $markerChangesStart = $sharedMapLayer.IndexOf("boolean markerChanges")
@@ -250,8 +256,8 @@ $activityOnResume = if ($onResumeStart -ge 0 -and $onResumeEnd -gt $onResumeStar
 Assert-Contains -Text $activityOnResume -Pattern "applyImmersiveMode" -Message "onResume must restore immersive phone mode"
 
 $buildGradle = Get-Content -Raw -Encoding UTF8 (Join-Path $Project "build.gradle")
-Assert-Contains $buildGradle 'versionCode\s*=\s*42' "release must use versionCode 42"
-Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.7'" "release must use versionName 4.9.7"
+Assert-Contains $buildGradle 'versionCode\s*=\s*43' "release must use versionCode 43"
+Assert-Contains $buildGradle "versionName\s*=\s*'4\.9\.8'" "release must use versionName 4.9.8"
 Assert-Contains $buildGradle 'androidComponents\s*\{[\s\S]*beforeVariants\(selector\(\)\.withBuildType\("release"\)\)[\s\S]*enableUnitTest\s*=\s*true' "AGP must create a real release unit-test variant"
 foreach ($dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
@@ -305,6 +311,12 @@ foreach ($permission in @(
 }
 
 $applicationNode = $manifest.SelectSingleNode("/manifest/application", $namespaceManager)
+$trackingServiceNode = $applicationNode.SelectSingleNode(
+        "service[@android:name='.TrackingService']", $namespaceManager)
+if ($null -eq $trackingServiceNode -or
+        $trackingServiceNode.GetAttribute("stopWithTask", $androidNamespace) -ne "false") {
+    throw "removing the phone task must not stop shared radar tracking"
+}
 $minCarApi = $applicationNode.SelectSingleNode(
         "meta-data[@android:name='androidx.car.app.minCarApiLevel']", $namespaceManager)
 if ($null -eq $minCarApi -or $minCarApi.GetAttribute("value", $androidNamespace) -ne "2") {
@@ -374,6 +386,9 @@ Assert-Contains $carService 'addAllowedHosts\(androidx\.car\.app\.R\.array\.host
 Assert-Contains $carService 'new GpsCarSession\(\)' "Car service must create GpsCarSession"
 Assert-Contains $carSession 'ACCESS_FINE_LOCATION' "Car session must require fine location"
 Assert-Contains $carSession 'ensureMapKit' "Car session must require a ready MapKit"
+Assert-Contains $carSession 'CarStartupDecision\.from' "Car session must separate radar startup from map availability"
+Assert-Contains $carSession 'if \(startup\.startTracking\)' "fine location must start radar tracking even without MapKit"
+Assert-Contains $carSession 'if \(!startup\.showMap\)' "MapKit readiness must only gate the car map"
 Assert-Contains $carSession 'TrackingService\.ACTION_START' "Car session must start the shared tracker"
 if ($carSession -match 'new\s+RadarBaseUpdater|new\s+StrelkaAlertTracker') {
     throw "Car session must not create a second updater or alert tracker"
@@ -381,6 +396,9 @@ if ($carSession -match 'new\s+RadarBaseUpdater|new\s+StrelkaAlertTracker') {
 Assert-Contains $carSession 'DrivingSnapshotIntent\.from' "Car session must decode shared tracking snapshots"
 Assert-Contains $carSession 'filter\.addAction\(RadarBaseUpdater\.ACTION_DATABASE_UPDATED\)' "Car session must subscribe to successful database replacements"
 Assert-Contains $carSession 'RadarBaseUpdater\.ACTION_DATABASE_UPDATED\.equals\(intent\.getAction\(\)\)[\s\S]*controller\.refreshVisible\(\)' "database replacement must refresh the stationary car viewport"
+Assert-Contains $carSession 'loadDatabaseCount\(\)' "Car session must load the shared database status"
+Assert-Contains $carSession 'controller\.onDatabaseCount\(result\)' "Car database status must reach the current surface"
+Assert-Contains $carSession 'new Handler\(Looper\.getMainLooper\(\)\)\.post' "Car database results must return safely on API 26 main loop"
 Assert-Contains $carSession 'new CarRadarBaseUpdateNotifier\(' "Car session must own RadarBase update feedback"
 Assert-Contains $carSession 'updateNotifier\.start\(\)' "Car session must start RadarBase feedback"
 Assert-Contains $carSession 'updateNotifier\.stop\(\)' "Car session must stop RadarBase feedback with its lifecycle"
@@ -391,6 +409,8 @@ Assert-Contains $carSession 'unregisterReceiver' "Car session must unregister it
 Assert-Contains $carSession 'getCarService\(ScreenManager\.class\)\.push\(' "surface failures must open a setup MessageTemplate"
 Assert-Contains $carSession 'new CarSetupScreen\(getCarContext\(\),\s*true,\s*true,\s*message\)' "surface failure details must reach CarSetupScreen"
 Assert-Contains $carSetupScreen 'surfaceError' "CarSetupScreen must render surface initialization errors"
+Assert-Contains $carSetupScreen 'if \(trackingActive\)[\s\S]*message\.append' "MapKit setup must explain that radar tracking remains active"
+Assert-Contains $carSetupScreen 'new CarMapKeyScreen' "missing MapKit setup must offer key entry in Android Auto"
 if ($carSession -match 'stopService') {
     throw "Car session destruction must not stop the shared TrackingService"
 }
@@ -456,6 +476,12 @@ if ($constructorBody -match 'new MapView|startMap\(') {
 Assert-Contains $carPresentation 'new SharedCameraMapLayer' "Car presentation must use the shared camera layer"
 Assert-Contains $carPresentation 'public void refreshVisible\(\)[\s\S]*mapLayer\.refreshVisible\(\)' "car presentation must delegate viewport refresh to the shared layer"
 Assert-Contains $carPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
+Assert-Contains $carPresentation 'mapLayer\.updateActiveCamera\(snapshot\.cameraId\)' "Car map must style the already selected camera as active"
+Assert-Contains $carPresentation 'databaseEmpty && !presentation\.hasActiveObject' "Car HUD must distinguish an empty database from an empty road"
+Assert-Contains $carPresentation 'registerOnSharedPreferenceChangeListener' "Car HUD must observe settings changed by the phone"
+Assert-Contains $carPresentation 'unregisterOnSharedPreferenceChangeListener' "Car HUD must release its settings observer"
+Assert-Contains $activity 'registerOnSharedPreferenceChangeListener' "Phone HUD must observe settings changed by Android Auto"
+Assert-Contains $activity 'unregisterOnSharedPreferenceChangeListener' "Phone HUD must release its settings observer"
 if ($carPresentation -match 'alertAlgorithm') {
     throw "Algorithm details must not be rendered in the car speed HUD"
 }
@@ -471,12 +497,15 @@ Assert-Contains $carPresentation 'params\.width = dp\(300\)' "empty stable area 
 Assert-Contains $carPresentation 'mapWindow\.setFocusRect\(null\)' "empty visible area must clear the MapKit focus rect"
 Assert-Contains $carPresentation 'ThemeSettings\.isDark' "Car HUD must follow the shared user theme"
 Assert-Contains $sharedMapLayer 'setNightModeEnabled' "shared phone and car maps must apply MapKit night mode"
+Assert-Contains $sharedMapLayer 'createLocationBitmap\(nightMode\)' "location arrow colors must follow the shared map theme"
+Assert-Contains $sharedMapLayer 'locationPlacemark\.setIcon\(\s*ImageProvider\.fromBitmap\(createLocationBitmap\(nightMode\)\)\)' "an existing location arrow must be recolored immediately when the theme changes"
 Assert-Contains $sharedMapLayer 'individualMarkerStyle\(\)[\s\S]*?setScale\(1\.0f\)' "individual object markers must render at full scale"
 Assert-Contains $sharedMapLayer 'clusterMarkerStyle\(\)[\s\S]*?setScale\(1\.0f\)' "cluster markers must render at full scale"
 Assert-Contains $sharedMapLayer 'locationMarkerStyle\(\)[\s\S]*?setScale\(0\.8f\)' "location arrow must render at 80 percent scale"
 Assert-Contains $carMapScreen 'NavigationTemplate\.Builder' "Car map must use NavigationTemplate"
 Assert-Contains $carMapScreen 'Action\.PAN' "Car map must expose the standard PAN action"
 Assert-Contains $carMapScreen 'setPanModeListener' "Car map must forward pan mode changes"
+Assert-Contains $carMapScreen 'if \(!surfaceController\.recenter\(\)\)[\s\S]*CarToast\.makeText' "Car recenter must explain why GPS is not ready"
 Assert-Contains $carMapScreen 'getCarService\(ScreenManager\.class\)[\s\S]*push\(new CarMenuScreen' "Car map menu action must push the real menu through ScreenManager"
 Assert-Contains $carMapScreen 'R\.drawable\.ic_car_menu' "Car map menu action must use its monochrome icon"
 Assert-Contains $carMenuItem 'UPDATE_DATABASE,\s*OVERSPEED_THRESHOLD,\s*HUD_TRANSPARENCY,\s*AUTO_ROTATE_MAP,\s*THEME,\s*MAPKIT_KEY,\s*ABOUT,\s*EXIT' "Car menu actions must remain in the required display order"
@@ -489,10 +518,9 @@ if ($carMenu -match 'CarToast|addListener|removeListener') {
     throw "Car menu must not duplicate session-owned RadarBase feedback"
 }
 Assert-Contains $carMenu 'case EXIT:\s*exitAction\.exit\(\)' "Only the Exit row may invoke ExitAction"
-if ([regex]::Matches($carMenu, 'stopService\(').Count -ne 1) {
-    throw "Only the explicit Android Auto exit adapter may stop TrackingService"
-}
-Assert-Contains $carMenu 'stopService\([\s\S]*TrackingService\.class' "Explicit Android Auto exit must stop TrackingService"
+Assert-Contains $carMenu 'TrackingService\.requestStop\(carContext\)' "Explicit Android Auto exit must use the shared stop command"
+Assert-Contains $tracking 'public static void requestStop\(Context context\)' "phone and car exits must share one TrackingService stop command"
+Assert-Contains $tracking 'ACTION_STOPPED' "stopping shared tracking must notify every visible client"
 Assert-Contains $carMenu 'popToRoot\(\)' "Explicit Android Auto exit must pop to the root screen"
 Assert-Contains $carMenu 'finishCarApp\(\)' "Explicit Android Auto exit must finish the car app"
 
@@ -504,7 +532,7 @@ Assert-Contains $carValue 'putInt\(setting\.preferenceKey\(\),\s*adjusted\)\.com
 Assert-Contains $carValue 'surfaceController::refreshHudTransparency' "HUD transparency changes must refresh the shared car presentation"
 Assert-Contains $carMapKey 'SearchTemplate\.Builder' "MapKit key input must use SearchTemplate"
 Assert-Contains $carMapKey 'searchText == null \? "" : searchText\.trim\(\)' "MapKit key input must trim and reject blank input"
-Assert-Contains $carMapKey 'putString\(AppSettings\.MAPKIT_KEY,\s*key\)\.commit\(\)' "MapKit key must be persisted synchronously"
+Assert-Contains $carMapKey 'putString\(AppSettings\.MAPKIT_KEY,\s*key\)[\s\S]*putBoolean\(AppSettings\.MAPKIT_KEY_REENTRY,\s*true\)[\s\S]*commit\(\)' "MapKit key and migration state must be persisted synchronously"
 Assert-Contains $carMapKey 'CarToast\.makeText' "MapKit key validation and restart notice must use CarToast"
 Assert-Contains $carAbout 'LongMessageTemplate\.Builder' "Android Auto About must use LongMessageTemplate"
 Assert-Contains $carAbout 'new CameraDatabase\(carContext\)' "Android Auto About must read the shared camera database"
@@ -514,7 +542,10 @@ Assert-Contains $carAbout 'if \(destroyed\) return;\s*databaseCount = result;\s*
 Assert-Contains $carAbout 'ReleaseHistory\.entries\(\)' "Android Auto About must render only the shared known release history"
 Assert-Contains $carGestures 'Math\.log\(scaleFactor\).*Math\.log\(2' "Car scale must use logarithmic zoom"
 Assert-Contains $carGestures 'screenToWorld' "Car pan/click gestures must convert screen coordinates"
+Assert-Contains $carGestures 'if \(target\.tapCameraAt\(x, y\)\) return;' "Car camera taps must be consumed before the background click"
 Assert-Contains $carGestures 'Animation\.Type\.SMOOTH' "Car fling must use a short smooth map animation"
+Assert-Contains $activity 'CameraHintFormatter\.format\(camera\)' "phone marker hints must use the shared formatter"
+Assert-Contains $carPresentation 'CameraHintFormatter\.format\(camera\)' "car marker hints must use the shared formatter"
 
 foreach ($iconName in @(
         "ic_car_zoom_in.xml", "ic_car_zoom_out.xml",

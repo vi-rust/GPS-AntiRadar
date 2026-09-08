@@ -28,6 +28,7 @@ public final class TrackingService extends Service implements LocationListener {
     public static final String ACTION_START = "ru.gpsantiradar.app.START";
     public static final String ACTION_STOP = "ru.gpsantiradar.app.STOP";
     public static final String ACTION_UPDATE = "ru.gpsantiradar.app.UPDATE";
+    public static final String ACTION_STOPPED = "ru.gpsantiradar.app.STOPPED";
     public static final String EXTRA_SPEED = "speed";
     public static final String EXTRA_DISTANCE = "distance";
     public static final String EXTRA_CAMERA = "camera";
@@ -472,8 +473,17 @@ public final class TrackingService extends Service implements LocationListener {
 
     private void stopTracking() {
         try { locationManager.removeUpdates(this); } catch (RuntimeException ignored) {}
+        sendBroadcast(new Intent(ACTION_STOPPED).setPackage(getPackageName()));
         stopForeground(true);
         stopSelf();
+    }
+
+    public static void requestStop(Context context) {
+        if (context == null) return;
+        Context application = context.getApplicationContext();
+        application.sendBroadcast(new Intent(ACTION_STOPPED)
+                .setPackage(application.getPackageName()));
+        application.stopService(new Intent(application, TrackingService.class));
     }
 
     @Override public void onProviderEnabled(String provider) {}

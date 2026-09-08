@@ -17,7 +17,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ParserGeoTest {
     public static void main(String[] args) throws Exception {
         verifyCarSurfaceSpec();
+        verifyCarStartupDecision();
         verifyThemeResolution();
+        verifyMapVisualStyle();
+        verifyMapMarkerHitTest();
+        verifyCameraHintFormatter();
         String json = "{\"meta\":{\"ver\":\"3.0\",\"build\":3995,"
                 + "\"exportDate\":\"2026-08-28T05:05:00Z\"},"
                 + "\"objects\":["
@@ -198,6 +202,78 @@ public final class ParserGeoTest {
         System.out.println("ParserGeoTest: OK");
     }
 
+    private static void verifyMapVisualStyle() {
+        MapVisualStyle.Coverage normal = MapVisualStyle.coverage(
+                0xFFDC3730, 2481003L, -1L);
+        check(normal.fillColor == 0x26DC3730,
+                "normal zone fill preserves its type color at 85 percent transparency");
+        check(normal.strokeColor == 0x4DDC3730,
+                "normal zone border preserves its type color at 70 percent transparency");
+
+        MapVisualStyle.Coverage active = MapVisualStyle.coverage(
+                0xFFDC3730, 2481003L, 2481003L);
+        check(active.fillColor == 0x4DDC3730,
+                "active zone fill preserves its type color at 70 percent transparency");
+        check(active.strokeColor == 0x73DC3730,
+                "active zone border preserves its type color at 55 percent transparency");
+
+        MapVisualStyle.Coverage other = MapVisualStyle.coverage(
+                0xFFDC3730, 2481004L, 2481003L);
+        check(other.fillColor == normal.fillColor && other.strokeColor == normal.strokeColor,
+                "only the currently controlled object receives active zone colors");
+        MapVisualStyle.Coverage blue = MapVisualStyle.coverage(
+                0xFF236FDC, 2481004L, 2481003L);
+        check(blue.fillColor == 0x26236FDC && blue.strokeColor == 0x4D236FDC,
+                "each inactive zone keeps the original color of its object type");
+        check(MapVisualStyle.locationPrimaryColor(false) == 0xFF1976D2
+                        && MapVisualStyle.locationHighlightColor(false) == 0xFF64B5F6,
+                "day current-location arrow uses the blue palette");
+        check(MapVisualStyle.locationPrimaryColor(true) == 0xFFFFBE00
+                        && MapVisualStyle.locationHighlightColor(true) == 0xFFFFD848,
+                "night current-location arrow restores the original yellow palette");
+    }
+
+    private static void verifyCarStartupDecision() {
+        CarStartupDecision ready = CarStartupDecision.from(true, true);
+        check(ready.startTracking && ready.showMap,
+                "car starts tracking and shows the map when setup is ready");
+        CarStartupDecision mapMissing = CarStartupDecision.from(true, false);
+        check(mapMissing.startTracking && !mapMissing.showMap,
+                "car keeps radar tracking active when only MapKit is missing");
+        CarStartupDecision locationMissing = CarStartupDecision.from(false, true);
+        check(!locationMissing.startTracking && !locationMissing.showMap,
+                "car does not start tracking without fine location permission");
+    }
+
+    private static void verifyMapMarkerHitTest() {
+        CameraPoint farther = new CameraPoint();
+        farther.id = 10L;
+        CameraPoint nearer = new CameraPoint();
+        nearer.id = 11L;
+        List<MapMarkerHitTest.Candidate> candidates = new ArrayList<>();
+        candidates.add(new MapMarkerHitTest.Candidate(farther, 120f, 100f));
+        candidates.add(new MapMarkerHitTest.Candidate(nearer, 106f, 102f));
+
+        check(MapMarkerHitTest.nearest(100f, 100f, 28f, candidates) == nearer,
+                "marker hit test selects the nearest individual camera");
+        check(MapMarkerHitTest.nearest(200f, 200f, 28f, candidates) == null,
+                "marker hit test rejects taps outside the marker radius");
+    }
+
+    private static void verifyCameraHintFormatter() {
+        CameraPoint camera = new CameraPoint();
+        camera.type = 1;
+        camera.dirType = 1;
+        camera.distanceMeters = 650;
+        camera.speedRules = SpeedControlRules.encode(
+                80, false, -1, -1, 0, 0, SpeedControlRules.CAR);
+        String hint = CameraHintFormatter.format(camera);
+        check(hint.contains(camera.typeName()) && hint.contains("80 км/ч")
+                        && hint.contains("Зона контроля: 650 м")
+                        && hint.contains(camera.directionName()),
+                "phone and car camera hints share all control details");
+    }
+
     private static void verifyThemeResolution() {
         long equinoxNoonUtc = java.time.Instant.parse("2026-03-20T12:00:00Z").toEpochMilli();
         long equinoxMidnightUtc = java.time.Instant.parse("2026-03-20T00:00:00Z").toEpochMilli();
@@ -264,26 +340,48 @@ public final class ParserGeoTest {
                         && insideZone.alertState.equals("inside")
                         && insideZone.alertAlgorithm.equals("diagnostic"),
                 "active driving snapshot preserves shared movement state");
-        DrivingHudPresentation insideHud = DrivingHudPresentation.from(insideZone);
+        DrivingHudPresentation insideHud = hud(insideZone, 10);
         check(insideHud.speedText.equals("65") && insideHud.distanceText.equals("250 м")
                         && insideHud.cameraText.equals("Камера  ·  80 км/ч")
-                        && insideHud.speedColor == DrivingHudPresentation.COLOR_ALERT
+                        && insideHud.speedColor == DrivingHudPresentation.COLOR_GREEN
                         && insideHud.hasActiveObject
                         && !insideHud.cameraText.contains("diagnostic"),
-                "inside-zone HUD formats the active object without diagnostics");
+                "inside-zone HUD stays green below the speed limit");
 
-        DrivingHudPresentation farHud = DrivingHudPresentation.from(new DrivingSnapshot(
-                70f, Float.NaN, 1250, "Камера", 43L, 80, 800,
-                Double.NaN, Double.NaN, Float.NaN, "", ""));
+        DrivingHudPresentation farHud = hud(new DrivingSnapshot(
+                120f, Float.NaN, 1250, "Камера", 43L, 80, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""), 10);
         check(farHud.distanceText.equals("1.3 км")
                         && farHud.speedColor == DrivingHudPresentation.COLOR_GREEN,
-                "HUD formats distances above one kilometer and inactive color");
+                "HUD stays green outside the object visibility zone");
 
-        DrivingHudPresentation overspeedHud = DrivingHudPresentation.from(
-                new DrivingSnapshot(81f, Float.NaN, 250, "Камера", 44L, 80, 800,
-                        Double.NaN, Double.NaN, Float.NaN, "", ""));
-        check(overspeedHud.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
-                "overspeed color takes priority inside the alert zone");
+        DrivingHudPresentation unrestrictedHud = hud(new DrivingSnapshot(
+                120f, Float.NaN, 800, "Опасный участок", 44L, 0, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""), 10);
+        check(unrestrictedHud.speedColor == DrivingHudPresentation.COLOR_GREEN,
+                "inside-zone HUD stays green without a speed limit");
+
+        DrivingHudPresentation atLimitHud = hud(new DrivingSnapshot(
+                80f, Float.NaN, 800, "Камера", 45L, 80, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""), 5);
+        check(atLimitHud.speedColor == DrivingHudPresentation.COLOR_ALERT,
+                "inside-zone HUD turns yellow at the speed limit");
+
+        DrivingHudPresentation withinThresholdHud = hud(new DrivingSnapshot(
+                84.9f, Float.NaN, 800, "Камера", 46L, 80, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""), 5);
+        check(withinThresholdHud.speedColor == DrivingHudPresentation.COLOR_ALERT,
+                "inside-zone HUD stays yellow below the configured threshold boundary");
+
+        DrivingHudPresentation atThresholdHud = hud(new DrivingSnapshot(
+                85f, Float.NaN, 800, "Камера", 47L, 80, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""), 5);
+        check(atThresholdHud.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
+                "inside-zone HUD turns red at the configured threshold boundary");
+    }
+
+    private static DrivingHudPresentation hud(DrivingSnapshot snapshot, int thresholdKmh) {
+        return DrivingHudPresentation.from(snapshot, thresholdKmh);
     }
 
     private static void check(boolean condition, String message) {
@@ -487,30 +585,31 @@ public final class ParserGeoTest {
 
     private static void verifyKnownReleaseHistory() {
         List<ReleaseHistory.Entry> releases = ReleaseHistory.entries();
-        check(releases.size() == 11, "about dialog contains every known release");
-        check(releases.get(0).version.equals("4.9.7")
-                        && releases.get(1).version.equals("4.9.6")
-                        && releases.get(2).version.equals("4.9.5")
-                        && releases.get(3).version.equals("4.9.4")
-                        && releases.get(4).version.equals("4.9.3")
-                        && releases.get(5).version.equals("4.9.2")
-                        && releases.get(6).version.equals("4.9.1")
-                        && releases.get(7).version.equals("4.9.0")
-                        && releases.get(8).version.equals("4.8.1")
-                        && releases.get(9).version.equals("4.8.0")
-                        && releases.get(10).version.equals("4.7.1"),
+        check(releases.size() == 12, "about dialog contains every known release");
+        check(releases.get(0).version.equals("4.9.8")
+                        && releases.get(1).version.equals("4.9.7")
+                        && releases.get(2).version.equals("4.9.6")
+                        && releases.get(3).version.equals("4.9.5")
+                        && releases.get(4).version.equals("4.9.4")
+                        && releases.get(5).version.equals("4.9.3")
+                        && releases.get(6).version.equals("4.9.2")
+                        && releases.get(7).version.equals("4.9.1")
+                        && releases.get(8).version.equals("4.9.0")
+                        && releases.get(9).version.equals("4.8.1")
+                        && releases.get(10).version.equals("4.8.0")
+                        && releases.get(11).version.equals("4.7.1"),
                 "release history is newest first");
         for (ReleaseHistory.Entry release : releases) {
             check(release.changes != null && !release.changes.trim().isEmpty(),
                     "every release has a visible change description");
         }
-        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.7");
+        ReleaseHistory.Entry current = ReleaseHistory.find("4.9.8");
         check(current != null && !current.changes.trim().isEmpty(),
                 "current release has a visible change description");
-        check(current.changes.contains("ночной")
-                        && current.changes.contains("рассвета")
-                        && current.changes.contains("Android Auto"),
-                "current release describes automatic night mode on both surfaces");
+        check(current.changes.contains("телефона")
+                        && current.changes.contains("Android Auto")
+                        && current.changes.contains("MapKit"),
+                "current release describes phone and Android Auto alignment");
         check(ReleaseHistory.find("missing") == null,
                 "unknown release has no fabricated description");
     }

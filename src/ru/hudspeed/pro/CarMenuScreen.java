@@ -1,7 +1,5 @@
 package ru.gpsantiradar.app;
 
-import android.content.Intent;
-
 import androidx.car.app.CarContext;
 import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
@@ -32,8 +30,7 @@ public final class CarMenuScreen extends Screen {
                 new SharedUpdateController(application(carContext).radarBaseUpdater()),
                 new ExitAction() {
                     @Override public void exit() {
-                        carContext.stopService(
-                                new Intent(carContext, TrackingService.class));
+                        TrackingService.requestStop(carContext);
                         carContext.getCarService(
                                 androidx.car.app.ScreenManager.class).popToRoot();
                         carContext.finishCarApp();

@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
 
 import com.yandex.mapkit.Animation;
+import com.yandex.mapkit.ScreenPoint;
 import com.yandex.mapkit.geometry.LinearRing;
 import com.yandex.mapkit.geometry.Point;
 import com.yandex.mapkit.geometry.Polygon;
@@ -60,11 +61,13 @@ public final class SharedCameraMapLayer {
     private PlacemarkMapObject locationPlacemark;
     private boolean cameraCoverageVisible;
     private boolean mapCenteredOnGps;
+    private boolean nightMode;
     private long followPausedUntil;
     private double lastLatitude = Double.NaN;
     private double lastLongitude = Double.NaN;
     private float lastHeadingDegrees;
     private float lastSpeedKmh;
+    private long activeCameraId = -1L;
     private volatile int initialLoadGeneration;
     private volatile int cameraLoadGeneration;
     private volatile boolean destroyed;
@@ -208,10 +211,17 @@ public final class SharedCameraMapLayer {
     }
 
     public void setNightMode(boolean enabled) {
+        if (destroyed) return;
+        boolean markerColorsChanged = nightMode != enabled;
+        nightMode = enabled;
         com.yandex.mapkit.map.Map activeMap = map;
-        if (!destroyed && activeMap != null
-                && activeMap.isNightModeEnabled() != enabled) {
+        if (activeMap != null && activeMap.isNightModeEnabled() != enabled) {
             activeMap.setNightModeEnabled(enabled);
+        }
+        if (markerColorsChanged && locationPlacemark != null
+                && locationPlacemark.isValid()) {
+            locationPlacemark.setIcon(
+                    ImageProvider.fromBitmap(createLocationBitmap(nightMode)));
         }
     }
 
@@ -226,6 +236,15 @@ public final class SharedCameraMapLayer {
                 lastHeadingDegrees, headingDegrees, speedKmh);
         updateLocationMarker();
         centerOnLocationFromGps(speedKmh);
+    }
+
+    /** Applies emphasis to the camera already selected by the tracking algorithm. */
+    public void updateActiveCamera(long cameraId) {
+        if (destroyed || activeCameraId == cameraId) return;
+        long previousActiveCameraId = activeCameraId;
+        activeCameraId = cameraId;
+        refreshCoverageStyle(previousActiveCameraId);
+        refreshCoverageStyle(activeCameraId);
     }
 
     public void moveToCurrentLocation() {
@@ -249,6 +268,29 @@ public final class SharedCameraMapLayer {
 
     public void zoomByImmediately(float delta) {
         zoomBy(delta, null);
+    }
+
+    /** Handles projected-surface clicks because they are not dispatched to MapView. */
+    public boolean tapCameraAt(float x, float y) {
+        if (destroyed || mapWindow == null || !Float.isFinite(x) || !Float.isFinite(y)) {
+            return false;
+        }
+        List<MapMarkerHitTest.Candidate> candidates = new ArrayList<>();
+        for (MapMarkerLayout.Entity entity : renderedMarkerEntities.values()) {
+            if (entity.cluster || entity.camera == null) continue;
+            ScreenPoint screen = mapWindow.worldToScreen(
+                    new Point(entity.latitude, entity.longitude));
+            if (screen != null) {
+                candidates.add(new MapMarkerHitTest.Candidate(
+                        entity.camera, screen.getX(), screen.getY()));
+            }
+        }
+        CameraPoint selected = MapMarkerHitTest.nearest(x, y, dp(28f), candidates);
+        Host activeHost = host;
+        if (selected == null || activeHost == null) return false;
+        activeHost.onCameraTapped(selected,
+                new Point(selected.latitude, selected.longitude));
+        return true;
     }
 
     private void zoomBy(float delta, Animation animation) {
@@ -294,6 +336,7 @@ public final class SharedCameraMapLayer {
         renderedMarkerEntities.clear();
         renderedCameraCoverage.clear();
         renderedCameras.clear();
+        activeCameraId = -1L;
         markerIcons.clear();
         markerResources.clear();
         clusterIcons.clear();
@@ -450,10 +493,10 @@ public final class SharedCameraMapLayer {
         if (!camera.isCameraOrControl()) return result;
         int baseColor = markerColor(camera.isObservation()
                 ? OBSERVATION_MARKER : camera.type);
-        int fill = Color.argb(52, Color.red(baseColor), Color.green(baseColor),
-                Color.blue(baseColor));
-        int stroke = Color.argb(145, Color.red(baseColor), Color.green(baseColor),
-                Color.blue(baseColor));
+        MapVisualStyle.Coverage colors = MapVisualStyle.coverage(
+                baseColor, camera.id, activeCameraId);
+        int fill = colors.fillColor;
+        int stroke = colors.strokeColor;
         Point origin = new Point(camera.latitude, camera.longitude);
         if (camera.dirType == 0) {
             addCoverageCircle(origin, camera.distanceMeters, fill, stroke, result);
@@ -463,12 +506,24 @@ public final class SharedCameraMapLayer {
         addCoverageSector(origin, primaryCoverageBearing(camera), camera.distanceMeters,
                 halfAngle, fill, stroke, result);
         if (camera.hasReverseZone()) {
-            int reverseFill = Color.argb(30, Color.red(baseColor), Color.green(baseColor),
-                    Color.blue(baseColor));
             addCoverageSector(origin, camera.direction, camera.reverseDistanceMeters,
-                    halfAngle, reverseFill, stroke, result);
+                    halfAngle, fill, stroke, result);
         }
         return result;
+    }
+
+    private void refreshCoverageStyle(long cameraId) {
+        CameraPoint camera = renderedCameras.get(cameraId);
+        List<PolygonMapObject> coverage = renderedCameraCoverage.get(cameraId);
+        if (camera == null || coverage == null) return;
+        int baseColor = markerColor(camera.isObservation()
+                ? OBSERVATION_MARKER : camera.type);
+        MapVisualStyle.Coverage colors = MapVisualStyle.coverage(
+                baseColor, camera.id, activeCameraId);
+        for (PolygonMapObject polygon : coverage) {
+            polygon.setFillColor(colors.fillColor);
+            polygon.setStrokeColor(colors.strokeColor);
+        }
     }
 
     private void addCoverageCircle(Point origin, double radiusMeters, int fill, int stroke,
@@ -613,14 +668,14 @@ public final class SharedCameraMapLayer {
         Point point = new Point(lastLatitude, lastLongitude);
         if (locationPlacemark == null || !locationPlacemark.isValid()) {
             locationPlacemark = locationCollection.addPlacemark(point,
-                    ImageProvider.fromBitmap(createLocationBitmap()), locationMarkerStyle());
+                    ImageProvider.fromBitmap(createLocationBitmap(nightMode)), locationMarkerStyle());
             locationPlacemark.setZIndex(100f);
         }
         locationPlacemark.setGeometry(point);
         locationPlacemark.setDirection(lastHeadingDegrees);
     }
 
-    private Bitmap createLocationBitmap() {
+    private Bitmap createLocationBitmap(boolean nightMode) {
         int size = dp(42);
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
@@ -640,7 +695,7 @@ public final class SharedCameraMapLayer {
         canvas.drawPath(outline, paint);
 
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(Color.rgb(255, 190, 0));
+        paint.setColor(MapVisualStyle.locationPrimaryColor(nightMode));
         canvas.drawPath(outline, paint);
 
         Path highlight = new Path();
@@ -648,7 +703,7 @@ public final class SharedCameraMapLayer {
         highlight.lineTo(center, dp(29));
         highlight.lineTo(dp(4), dp(36));
         highlight.close();
-        paint.setColor(Color.rgb(255, 216, 72));
+        paint.setColor(MapVisualStyle.locationHighlightColor(nightMode));
         canvas.drawPath(highlight, paint);
         return bitmap;
     }

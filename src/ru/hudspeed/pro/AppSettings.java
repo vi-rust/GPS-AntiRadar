@@ -4,6 +4,10 @@ public final class AppSettings {
     public static final String PREFERENCES = "settings";
     public static final String OVERSPEED_THRESHOLD = "overspeed_threshold_kmh";
     public static final String MAPKIT_KEY = "yandex_mapkit_key";
+    public static final String MAPKIT_PENDING = "mapkit_startup_pending";
+    public static final String MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4";
+    public static final String MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5";
+    public static final String MAPKIT_KEY_REENTRY = "mapkit_key_reentry_v6";
     public static final String HUD_TRANSPARENCY = "hud_transparency";
     public static final String AUTO_ROTATE_MAP = "auto_rotate_map";
     public static final String THEME_MODE = "theme_mode";

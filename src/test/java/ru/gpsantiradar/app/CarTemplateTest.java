@@ -7,8 +7,10 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import android.content.Context;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
@@ -56,11 +58,13 @@ import java.lang.reflect.Method;
 
 @RunWith(RobolectricTestRunner.class)
 public final class CarTemplateTest {
-    @Test public void releaseMetadataDescribesNightMode() {
-        assertEquals("4.9.7", BuildConfig.VERSION_NAME);
+    @Test public void releaseMetadataDescribesPhoneAndCarAlignment() {
+        assertEquals("4.9.8", BuildConfig.VERSION_NAME);
         ReleaseHistory.Entry release = ReleaseHistory.find(BuildConfig.VERSION_NAME);
         assertTrue(release != null);
-        assertTrue(release.changes.toLowerCase().contains("ночн"));
+        assertTrue(release.changes.contains("Android Auto"));
+        assertTrue(release.changes.contains("телефона"));
+        assertTrue(release.changes.contains("MapKit"));
     }
 
     @Test public void themeTransitionKeepsCurrentPhoneViewAndHud() throws Exception {
@@ -125,6 +129,50 @@ public final class CarTemplateTest {
         assertTrue(distance != null);
         assertEquals(Color.rgb(238, 238, 238), distance.getCurrentTextColor());
         activity.finish();
+    }
+
+    @Test public void phoneHudAppliesConfiguredThresholdColor() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().putInt(AppSettings.OVERSPEED_THRESHOLD, 10).commit();
+        MainActivity activity = Robolectric.buildActivity(MainActivity.class)
+                .create().get();
+        View root = ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
+        TextView speed = findText(root, "0");
+        assertTrue(speed != null);
+        java.lang.reflect.Field receiverField = MainActivity.class.getDeclaredField("receiver");
+        receiverField.setAccessible(true);
+        BroadcastReceiver receiver = (BroadcastReceiver) receiverField.get(activity);
+        Intent update = new Intent(TrackingService.ACTION_UPDATE)
+                .putExtra(TrackingService.EXTRA_SPEED, 70f)
+                .putExtra(TrackingService.EXTRA_DISTANCE, 500)
+                .putExtra(TrackingService.EXTRA_CAMERA, "Камера")
+                .putExtra(TrackingService.EXTRA_CAMERA_ID, 42L)
+                .putExtra(TrackingService.EXTRA_LIMIT, 60)
+                .putExtra(TrackingService.EXTRA_ALERT_DISTANCE, 500);
+
+        receiver.onReceive(activity, update);
+
+        assertEquals("70", speed.getText().toString());
+        assertEquals(DrivingHudPresentation.COLOR_OVERSPEED, speed.getCurrentTextColor());
+        activity.finish();
+    }
+
+    @Test public void carHudUsesConfiguredThresholdColor() {
+        Context context = ApplicationProvider.getApplicationContext();
+        context.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+                .edit().clear().putInt(AppSettings.OVERSPEED_THRESHOLD, 5).commit();
+        CarMapPresentation presentation =
+                new CarMapPresentation(context, null, carContext());
+
+        presentation.onDrivingSnapshot(new DrivingSnapshot(
+                64f, Float.NaN, 500, "Камера", 42L, 60, 800,
+                Double.NaN, Double.NaN, Float.NaN, "", ""));
+
+        TextView speed = findText(presentation.rootView(), "64");
+        assertTrue(speed != null);
+        assertEquals(DrivingHudPresentation.COLOR_ALERT, speed.getCurrentTextColor());
+        presentation.destroy();
     }
 
     @Test public void phoneMenuShowsStoredTheme() {

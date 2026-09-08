@@ -17,6 +17,7 @@ public final class CarMapGestureController {
         void pauseFollowing();
         void panBy(float offsetX, float offsetY, boolean animated);
         Point pointAt(float x, float y);
+        default boolean tapCameraAt(float x, float y) { return false; }
     }
 
     private static final float FLING_SECONDS = 0.12f;
@@ -74,6 +75,7 @@ public final class CarMapGestureController {
 
     public void onClick(float x, float y) {
         if (!Float.isFinite(x) || !Float.isFinite(y)) return;
+        if (target.tapCameraAt(x, y)) return;
         Point point = target.pointAt(x, y);
         if (point != null && clickListener != null) clickListener.onMapClick(point);
     }
@@ -112,6 +114,10 @@ public final class CarMapGestureController {
 
         @Override public Point pointAt(float x, float y) {
             return mapWindow.screenToWorld(new ScreenPoint(x, y));
+        }
+
+        @Override public boolean tapCameraAt(float x, float y) {
+            return mapLayer.tapCameraAt(x, y);
         }
 
         @Override public void panBy(float offsetX, float offsetY, boolean animated) {

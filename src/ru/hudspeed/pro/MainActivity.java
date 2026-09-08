@@ -49,10 +49,6 @@ public final class MainActivity extends Activity {
     private static final int NOTIFICATION_REQUEST = 102;
     private static final int GREEN = Color.rgb(0, 166, 82);
     private static final String SETTINGS = AppSettings.PREFERENCES;
-    private static final String MAPKIT_PENDING = "mapkit_startup_pending";
-    private static final String MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4";
-    private static final String MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5";
-    private static final String MAPKIT_KEY_REENTRY = "mapkit_key_reentry_v6";
     private static final String RADARBASE_LAST_SUCCESSFUL_DOWNLOAD =
             AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD;
     private static final long HINT_ANIMATION_MS = 220L;
@@ -81,7 +77,29 @@ public final class MainActivity extends Activity {
     private boolean mapRecoveryRequired;
     private boolean hasCurrentLocation;
     private boolean darkTheme;
+    private boolean databaseEmpty;
+    private boolean trackingStopped;
+    private boolean settingsListenerRegistered;
     private int hintGeneration;
+    private DrivingSnapshot latestSnapshot = DrivingSnapshot.idle();
+    private SharedPreferences settingsPreferences;
+
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsListener =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override public void onSharedPreferenceChanged(
+                        SharedPreferences sharedPreferences, String key) {
+                    if (AppSettings.HUD_TRANSPARENCY.equals(key)) {
+                        applyHudTransparency(sharedPreferences.getInt(
+                                AppSettings.HUD_TRANSPARENCY,
+                                AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT));
+                    } else if (AppSettings.THEME_MODE.equals(key)) {
+                        refreshThemeIfNeeded();
+                    } else if (AppSettings.OVERSPEED_THRESHOLD.equals(key)
+                            && !trackingStopped) {
+                        renderHud(latestSnapshot);
+                    }
+                }
+            };
 
     private final Runnable themeRefresh = new Runnable() {
         @Override public void run() {
@@ -94,19 +112,22 @@ public final class MainActivity extends Activity {
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
+            if (TrackingService.ACTION_STOPPED.equals(intent.getAction())) {
+                showTrackingStopped();
+                return;
+            }
             DrivingSnapshot snapshot = DrivingSnapshotIntent.from(intent);
-            DrivingHudPresentation presentation = DrivingHudPresentation.from(snapshot);
+            latestSnapshot = snapshot;
+            trackingStopped = false;
             hasCurrentLocation = snapshot.hasLocation();
             if (snapshot.hasLocation()) {
                 ThemeSettings.rememberLocation(MainActivity.this,
                         snapshot.latitude, snapshot.longitude);
                 refreshThemeIfNeeded(snapshot.latitude, snapshot.longitude);
             }
-            speedView.setText(presentation.speedText);
-            distanceView.setText(presentation.distanceText);
-            cameraView.setText(presentation.cameraText);
-            cameraView.setTextColor(presentation.speedColor);
+            renderHud(snapshot);
             if (cameraMapLayer != null) {
+                cameraMapLayer.updateActiveCamera(snapshot.cameraId);
                 cameraMapLayer.updateCurrentLocation(
                         snapshot.latitude, snapshot.longitude, snapshot.speedKmh,
                         snapshot.headingDegrees);
@@ -130,6 +151,7 @@ public final class MainActivity extends Activity {
             };
 
     @Override protected void onCreate(Bundle state) {
+        settingsPreferences = getSharedPreferences(SETTINGS, MODE_PRIVATE);
         darkTheme = ThemeSettings.isDark(this);
         setTheme(darkTheme ? R.style.AppThemeDark : R.style.AppTheme);
         super.onCreate(state);
@@ -146,7 +168,7 @@ public final class MainActivity extends Activity {
             getWindow().getDecorView().postDelayed(new Runnable() {
                 @Override public void run() {
                     getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                            .remove(MAPKIT_PENDING).apply();
+                            .remove(AppSettings.MAPKIT_PENDING).apply();
                 }
             }, 5000);
         }
@@ -190,37 +212,38 @@ public final class MainActivity extends Activity {
 
         // Version 3.2 could report an initialized SDK even when the server rejected
         // the entered value. Ask once for a fresh MapKit Mobile SDK key.
-        if (!preferences.getBoolean(MAPKIT_KEY_REENTRY, false)) {
+        if (!preferences.getBoolean(AppSettings.MAPKIT_KEY_REENTRY, false)) {
             boolean hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY);
-            preferences.edit().putBoolean(MAPKIT_KEY_REENTRY, true)
-                    .remove(AppSettings.MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+            preferences.edit().putBoolean(AppSettings.MAPKIT_KEY_REENTRY, true)
+                    .remove(AppSettings.MAPKIT_KEY)
+                    .remove(AppSettings.MAPKIT_PENDING).commit();
             mapRecoveryRequired = hadStoredKey;
             if (hadStoredKey) return false;
         }
 
         // A pending flag from 3.1 can be caused by the old all-markers-at-once crash,
         // not by the API key. Keep the key when upgrading to the viewport renderer.
-        if (!preferences.getBoolean(MAPKIT_MARKER_FIX, false)) {
-            preferences.edit().putBoolean(MAPKIT_MARKER_FIX, true)
-                    .remove(MAPKIT_PENDING).commit();
+        if (!preferences.getBoolean(AppSettings.MAPKIT_MARKER_FIX, false)) {
+            preferences.edit().putBoolean(AppSettings.MAPKIT_MARKER_FIX, true)
+                    .remove(AppSettings.MAPKIT_PENDING).commit();
         }
 
         // Version 3 initialized MapKit before an Activity existed and could leave the app
         // in a startup crash loop. Discard that stored key once when upgrading.
-        if (!preferences.getBoolean(MAPKIT_SAFE_MIGRATION, false)) {
+        if (!preferences.getBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, false)) {
             boolean hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY);
             preferences.edit()
-                    .putBoolean(MAPKIT_SAFE_MIGRATION, true)
+                    .putBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, true)
                     .remove(AppSettings.MAPKIT_KEY)
-                    .remove(MAPKIT_PENDING)
+                    .remove(AppSettings.MAPKIT_PENDING)
                     .commit();
             mapRecoveryRequired = hadStoredKey;
             if (hadStoredKey) return false;
         }
 
-        if (preferences.getBoolean(MAPKIT_PENDING, false)) {
+        if (preferences.getBoolean(AppSettings.MAPKIT_PENDING, false)) {
             preferences.edit().remove(AppSettings.MAPKIT_KEY)
-                    .remove(MAPKIT_PENDING).commit();
+                    .remove(AppSettings.MAPKIT_PENDING).commit();
             mapRecoveryRequired = true;
             return false;
         }
@@ -232,11 +255,11 @@ public final class MainActivity extends Activity {
             return false;
         }
 
-        preferences.edit().putBoolean(MAPKIT_PENDING, true).commit();
+        preferences.edit().putBoolean(AppSettings.MAPKIT_PENDING, true).commit();
         boolean initialized = GpsAntiRadarApplication.ensureMapKit(this);
         if (!initialized) {
             preferences.edit().remove(AppSettings.MAPKIT_KEY)
-                    .remove(MAPKIT_PENDING).commit();
+                    .remove(AppSettings.MAPKIT_PENDING).commit();
             mapRecoveryRequired = true;
         }
         return initialized;
@@ -280,7 +303,8 @@ public final class MainActivity extends Activity {
                 mapInitialized = false;
                 mapRecoveryRequired = true;
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .remove(AppSettings.MAPKIT_KEY).remove(MAPKIT_PENDING).commit();
+                        .remove(AppSettings.MAPKIT_KEY)
+                        .remove(AppSettings.MAPKIT_PENDING).commit();
             }
         }
         if (!mapInitialized) {
@@ -717,7 +741,7 @@ public final class MainActivity extends Activity {
     }
 
     private void exitApplication() {
-        stopService(new Intent(this, TrackingService.class));
+        TrackingService.requestStop(this);
         finishAndRemoveTask();
     }
 
@@ -766,7 +790,7 @@ public final class MainActivity extends Activity {
         if (cameraHintView == null || mapView == null || mapOverlay == null) return;
         ScreenPoint screen = mapView.getMapWindow().worldToScreen(point);
         if (screen == null) return;
-        cameraHintView.setText(cameraHint(camera));
+        cameraHintView.setText(CameraHintFormatter.format(camera));
         int maxWidth = Math.max(dp(180), mapOverlay.getWidth() - dp(24));
         cameraHintView.measure(
                 View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
@@ -831,8 +855,8 @@ public final class MainActivity extends Activity {
                     if (value.isEmpty()) return;
                     getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
                             .putString(AppSettings.MAPKIT_KEY, value)
-                            .remove(MAPKIT_PENDING)
-                            .putBoolean(MAPKIT_SAFE_MIGRATION, true)
+                            .remove(AppSettings.MAPKIT_PENDING)
+                            .putBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, true)
                             .commit();
                     mapRecoveryRequired = false;
                     Toast.makeText(MainActivity.this,
@@ -958,10 +982,8 @@ public final class MainActivity extends Activity {
                     final int count = db.count();
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
-                            if (count == 0) {
-                                cameraView.setText("Обновите базу RadarBase");
-                                cameraView.setTextColor(secondaryTextColor());
-                            }
+                            databaseEmpty = count == 0;
+                            if (!trackingStopped) renderHud(latestSnapshot);
                         }
                     });
                 }
@@ -1005,19 +1027,31 @@ public final class MainActivity extends Activity {
                 .format(new Date(timestamp));
     }
 
-    private String cameraHint(CameraPoint camera) {
-        StringBuilder result = new StringBuilder(camera.typeName());
-        int speedLimit = camera.currentSpeedLimit();
-        if (speedLimit > 0) {
-            result.append(" · ").append(speedLimit).append(" км/ч");
-        }
-        result.append(camera.isCameraOrControl() ? "\nЗона контроля: " : "\nОповещение: ")
-                .append(camera.distanceMeters).append(" м");
-        result.append("\nНаправленность: ").append(camera.directionName());
-        if (camera.isCameraOrControl() && camera.dirType == 0) {
-            result.append("\nФорма зоны: круг");
-        }
-        return result.toString();
+    private void renderHud(DrivingSnapshot snapshot) {
+        int overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
+                settingsPreferences.getInt(AppSettings.OVERSPEED_THRESHOLD,
+                        AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH));
+        DrivingHudPresentation presentation = DrivingHudPresentation.from(
+                snapshot, overspeedThresholdKmh);
+        speedView.setText(presentation.speedText);
+        speedView.setTextColor(presentation.speedColor);
+        distanceView.setText(presentation.distanceText);
+        cameraView.setText(databaseEmpty && !presentation.hasActiveObject
+                ? "База объектов пуста — обновите RadarBase"
+                : presentation.cameraText);
+        cameraView.setTextColor(presentation.speedColor);
+    }
+
+    private void showTrackingStopped() {
+        trackingStopped = true;
+        latestSnapshot = DrivingSnapshot.idle();
+        hasCurrentLocation = false;
+        speedView.setText("0");
+        speedView.setTextColor(GREEN);
+        distanceView.setText("—");
+        cameraView.setText("Антирадар остановлен");
+        cameraView.setTextColor(GREEN);
+        if (cameraMapLayer != null) cameraMapLayer.updateActiveCamera(-1L);
     }
 
     private TextView text(String value, int sp, int color, int style) {
@@ -1120,7 +1154,9 @@ public final class MainActivity extends Activity {
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override protected void onStart() {
         super.onStart();
-        IntentFilter filter = new IntentFilter(TrackingService.ACTION_UPDATE);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(TrackingService.ACTION_UPDATE);
+        filter.addAction(TrackingService.ACTION_STOPPED);
         IntentFilter radarBaseFilter =
                 new IntentFilter(RadarBaseUpdater.ACTION_DATABASE_UPDATED);
         if (Build.VERSION.SDK_INT >= 33) {
@@ -1132,6 +1168,8 @@ public final class MainActivity extends Activity {
         }
         ((GpsAntiRadarApplication) getApplication()).radarBaseUpdater()
                 .addListener(radarBaseUpdateListener, true);
+        settingsPreferences.registerOnSharedPreferenceChangeListener(settingsListener);
+        settingsListenerRegistered = true;
         refreshDatabaseCount();
         if (cameraMapLayer != null) cameraMapLayer.refreshVisible();
         if (mapView != null) {
@@ -1151,6 +1189,10 @@ public final class MainActivity extends Activity {
         }
         ((GpsAntiRadarApplication) getApplication()).radarBaseUpdater()
                 .removeListener(radarBaseUpdateListener);
+        if (settingsListenerRegistered) {
+            settingsPreferences.unregisterOnSharedPreferenceChangeListener(settingsListener);
+            settingsListenerRegistered = false;
+        }
         unregisterReceiver(receiver);
         unregisterReceiver(radarBaseReceiver);
         super.onStop();
