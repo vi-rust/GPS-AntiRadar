@@ -258,6 +258,16 @@ class CarMapPresentation(
         )
     }
 
+    fun refreshCoverageSettings() {
+        if (!destroyed) mapLayer?.refreshCoverageSettings()
+    }
+
+    fun cameraState(): CarMapCameraState? = if (destroyed) null else mapLayer?.cameraState()
+
+    fun restoreCameraState(state: CarMapCameraState?) {
+        if (!destroyed) mapLayer?.restoreCameraState(state)
+    }
+
     fun destroy() {
         if (destroyed) return
         destroyed = true
@@ -378,6 +388,10 @@ class CarMapPresentation(
             AppSettings.HUD_TRANSPARENCY -> refreshHudTransparency()
             AppSettings.THEME_MODE -> applyTheme(ThemeSettings.isDark(context))
             AppSettings.OVERSPEED_THRESHOLD -> if (!trackingStopped) renderHud(latestSnapshot)
+            AppSettings.ZONE_TRANSPARENCY,
+            AppSettings.ACTIVE_ZONE_TRANSPARENCY,
+            AppSettings.ZONE_DISPLAY_MODE,
+            -> refreshCoverageSettings()
         }
     }
 

@@ -51,10 +51,16 @@ class CarMenuScreen internal constructor(
     private fun row(item: CarMenuItem): Row {
         val row = Row.Builder()
             .setTitle(
-                if (item == CarMenuItem.THEME) {
-                    "Тема: ${ThemeSettings.mode(carContext).title()}"
-                } else {
-                    title(item)
+                when (item) {
+                    CarMenuItem.THEME -> "Тема: ${ThemeSettings.mode(carContext).title()}"
+                    CarMenuItem.ZONE_DISPLAY -> {
+                        val stored = carContext.getSharedPreferences(
+                            AppSettings.PREFERENCES,
+                            Context.MODE_PRIVATE,
+                        ).getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name)
+                        "Отображение зон: ${ZoneDisplayMode.fromStored(stored).title()}"
+                    }
+                    else -> title(item)
                 },
             )
             .setImage(icon(iconResource(item)), Row.IMAGE_TYPE_ICON)
@@ -86,6 +92,19 @@ class CarMenuScreen internal constructor(
             CarMenuItem.HUD_TRANSPARENCY -> screenManager.push(
                 CarValueScreen(carContext, CarValueScreen.Setting.HUD_TRANSPARENCY, surfaceController),
             )
+            CarMenuItem.ZONE_TRANSPARENCY -> screenManager.push(
+                CarValueScreen(carContext, CarValueScreen.Setting.ZONE_TRANSPARENCY, surfaceController),
+            )
+            CarMenuItem.ACTIVE_ZONE_TRANSPARENCY -> screenManager.push(
+                CarValueScreen(
+                    carContext,
+                    CarValueScreen.Setting.ACTIVE_ZONE_TRANSPARENCY,
+                    surfaceController,
+                ),
+            )
+            CarMenuItem.ZONE_DISPLAY -> screenManager.push(
+                CarZoneDisplayScreen(carContext, surfaceController),
+            )
             CarMenuItem.AUTO_ROTATE_MAP -> Unit
             CarMenuItem.THEME -> screenManager.push(CarThemeScreen(carContext, surfaceController))
             CarMenuItem.MAPKIT_KEY -> screenManager.push(CarMapKeyScreen(carContext))
@@ -109,6 +128,10 @@ class CarMenuScreen internal constructor(
             CarMenuItem.UPDATE_DATABASE -> R.drawable.ic_refresh
             CarMenuItem.OVERSPEED_THRESHOLD -> R.drawable.ic_speed_limit
             CarMenuItem.HUD_TRANSPARENCY -> R.drawable.ic_opacity
+            CarMenuItem.ZONE_TRANSPARENCY,
+            CarMenuItem.ACTIVE_ZONE_TRANSPARENCY,
+            -> R.drawable.ic_opacity
+            CarMenuItem.ZONE_DISPLAY -> R.drawable.ic_zones
             CarMenuItem.AUTO_ROTATE_MAP -> R.drawable.ic_navigation
             CarMenuItem.THEME -> R.drawable.ic_theme
             CarMenuItem.MAPKIT_KEY -> R.drawable.ic_key
@@ -120,6 +143,9 @@ class CarMenuScreen internal constructor(
             CarMenuItem.UPDATE_DATABASE -> "Обновить базу"
             CarMenuItem.OVERSPEED_THRESHOLD -> "Предел превышения скорости"
             CarMenuItem.HUD_TRANSPARENCY -> "Прозрачность HUD"
+            CarMenuItem.ZONE_TRANSPARENCY -> "Прозрачность зон"
+            CarMenuItem.ACTIVE_ZONE_TRANSPARENCY -> "Прозрачность активной зоны"
+            CarMenuItem.ZONE_DISPLAY -> "Отображение зон"
             CarMenuItem.AUTO_ROTATE_MAP -> "Автоповорот карты"
             CarMenuItem.THEME -> "Тема"
             CarMenuItem.MAPKIT_KEY -> "Ключ MapKit"

@@ -58,13 +58,13 @@ import java.lang.reflect.Method
 @RunWith(RobolectricTestRunner::class)
  class CarTemplateTest {
 @Test
-fun releaseMetadataDescribesKotlinMigration() {
-assertEquals("4.9.9", BuildConfig.VERSION_NAME)
+fun releaseMetadataDescribesCurrentChanges() {
+assertEquals("4.9.10", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("Kotlin"))
-assertTrue(release!!.changes.contains("Gradle Kotlin DSL"))
-assertTrue(release!!.changes.contains("src/main/kotlin"))
+assertTrue(release!!.changes.contains("прозрачности"))
+assertTrue(release!!.changes.contains("Android Auto"))
+assertTrue(release!!.changes.contains("масштаб"))
 }
 
 @Test @Throws(Exception::class)
@@ -195,6 +195,9 @@ menu!!.performClick()
 val dialog = ShadowAlertDialog.getLatestAlertDialog()
 assertTrue(dialog != null && dialog!!.isShowing())
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Тема: Тёмная") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность зон: 85%") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность активной зоны: 70%") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Отображение зон: Все") != null)
 assertNull(findTextStartingWith(dialog!!.getWindow()!!.getDecorView(),
 "Расстояние оповещения"))
 dialog!!.dismiss()
@@ -285,6 +288,10 @@ assertSetting(CarValueScreen.Setting.OVERSPEED_THRESHOLD,
 AppSettings.OVERSPEED_THRESHOLD, 0, 20, 1, "10 км/ч")
 assertSetting(CarValueScreen.Setting.HUD_TRANSPARENCY,
 AppSettings.HUD_TRANSPARENCY, 0, 80, 5, "10%")
+assertSetting(CarValueScreen.Setting.ZONE_TRANSPARENCY,
+AppSettings.ZONE_TRANSPARENCY, 10, 90, 5, "85%")
+assertSetting(CarValueScreen.Setting.ACTIVE_ZONE_TRANSPARENCY,
+AppSettings.ACTIVE_ZONE_TRANSPARENCY, 10, 90, 5, "70%")
 }
 
 @Test
@@ -332,6 +339,9 @@ assertEquals(Arrays.asList(
 "Обновить базу",
 "Предел превышения скорости",
 "Прозрачность HUD",
+"Прозрачность зон",
+"Прозрачность активной зоны",
+"Отображение зон: Все",
 "Автоповорот карты",
 "Тема: Автоматически",
 "Ключ MapKit",
@@ -339,8 +349,9 @@ assertEquals(Arrays.asList(
 "Выход"), rowTitles(items!!))
 
 val screenManager = carContext!!.getCarService(androidx.car.app.ScreenManager::class.java) as TestScreenManager
-val expectedTitles = arrayOf<String?>("Предел превышения скорости", "Прозрачность HUD")
-for (index in 1..2)
+val expectedTitles = arrayOf<String?>("Предел превышения скорости", "Прозрачность HUD",
+"Прозрачность зон", "Прозрачность активной зоны")
+for (index in 1..4)
 {
 screenManager!!.reset()
 click(items!!.get(index) as Row)
@@ -349,7 +360,10 @@ assertTrue(pushed is CarValueScreen)
 assertEquals(expectedTitles!![index - 1],
 (pushed!!.onGetTemplate() as PaneTemplate).getTitle().toString())
 }
-val autoRotate = items!!.get(3) as Row
+screenManager!!.reset()
+click(items!!.get(5) as Row)
+assertTrue(screenManager!!.getScreensPushed().get(0) is CarZoneDisplayScreen)
+val autoRotate = items!!.get(6) as Row
 assertFalse(autoRotate!!.getToggle()!!.isChecked())
 autoRotate!!.getToggle()!!.getOnCheckedChangeDelegate().sendCheckedChange(
 true, object:OnDoneCallback {
@@ -359,14 +373,37 @@ assertTrue(carContext!!.getSharedPreferences(
 AppSettings.PREFERENCES, Context.MODE_PRIVATE).getBoolean(
 AppSettings.AUTO_ROTATE_MAP, false))
 screenManager!!.reset()
-click(items!!.get(4) as Row)
+click(items!!.get(7) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarThemeScreen)
 screenManager!!.reset()
-click(items!!.get(5) as Row)
+click(items!!.get(8) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarMapKeyScreen)
 screenManager!!.reset()
-click(items!!.get(6) as Row)
+click(items!!.get(9) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarAboutScreen)
+}
+
+@Test
+fun carZoneDisplayScreenPersistsSelectionAndRefreshesSurface() {
+val carContext = carContext()
+carContext!!.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+.edit().clear().commit()
+val refreshes = intArrayOf(0)
+val screen = CarZoneDisplayScreen(carContext, { refreshes!![0]++ })
+
+val initialItems = (screen.onGetTemplate() as ListTemplate)
+.getSingleList()!!.getItems()
+assertEquals(Arrays.asList("Все", "Только активная", "Не показывать"),
+rowTitles(initialItems!!))
+assertTrue((initialItems!!.get(0) as Row).getTexts().get(0).toString()
+.contains("Выбрано"))
+
+click(initialItems!!.get(1) as Row)
+
+assertEquals("ACTIVE_ONLY", carContext!!.getSharedPreferences(
+AppSettings.PREFERENCES, Context.MODE_PRIVATE).getString(
+AppSettings.ZONE_DISPLAY_MODE, ""))
+assertEquals(1, refreshes!![0])
 }
 
 @Test
@@ -407,7 +444,7 @@ val items = (screen.onGetTemplate() as ListTemplate)
 click(items!!.get(0) as Row)
 assertEquals(1, updates.requestCount)
 
-click(items!!.get(7) as Row)
+click(items!!.get(10) as Row)
 assertEquals(1, exits!![0])
 }
 
@@ -432,6 +469,26 @@ controller.refreshVisible()
 assertEquals(2, resources.size)
 assertEquals(1, resources.get(0).refreshCount)
 assertEquals(1, resources.get(1).refreshCount)
+}
+
+@Test
+fun cameraStateSurvivesSurfaceRecreation() {
+val carContext = carContext()
+val expected = CarMapCameraState(55.75, 37.61, 16.5f, 42f, 12f, true, 3500L)
+val resources = ArrayList<CameraStateSurfaceResource>()
+val controller = CarSurfaceController(
+carContext, null, { spec, surface->
+val resource = CameraStateSurfaceResource(if (resources.isEmpty()) expected else null)
+resources.add(resource)
+resource })
+
+controller.onSurfaceAvailable(SurfaceContainer(null, 800, 480, 160))
+controller.onSurfaceAvailable(SurfaceContainer(null, 1280, 720, 240))
+
+assertEquals(2, resources.size)
+assertNull(resources.get(0).restoredState)
+assertEquals(expected, resources.get(1).restoredState)
+controller.destroy()
 }
 
 @Test
@@ -1050,6 +1107,17 @@ private class RefreshRecordingSurfaceResource:NoOpSurfaceResource() {
 
 override fun refreshVisible() {
 refreshCount++
+}
+}
+
+private class CameraStateSurfaceResource(
+private val currentState:CarMapCameraState?):NoOpSurfaceResource() {
+ var restoredState:CarMapCameraState? = null
+
+override fun cameraState():CarMapCameraState? = currentState
+
+override fun restoreCameraState(state:CarMapCameraState?) {
+restoredState = state
 }
 }
 

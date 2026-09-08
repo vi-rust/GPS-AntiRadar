@@ -61,6 +61,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     private var lastHeadingDegrees = 0f
     private var lastSpeedKmh = 0f
     private var activeCameraId = -1L
+    private var appliedCoverageSettings: CoverageSettings? = null
 
     @Volatile
     private var initialLoadGeneration = 0
@@ -222,8 +223,48 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (destroyed || activeCameraId == cameraId) return
         val previousActiveCameraId = activeCameraId
         activeCameraId = cameraId
-        refreshCoverageStyle(previousActiveCameraId)
-        refreshCoverageStyle(activeCameraId)
+        if (coverageSettings().displayMode == ZoneDisplayMode.ACTIVE_ONLY) {
+            rebuildCameraCoverage()
+        } else {
+            refreshCoverageStyle(previousActiveCameraId)
+            refreshCoverageStyle(activeCameraId)
+        }
+    }
+
+    fun refreshCoverageSettings() {
+        if (!destroyed) rebuildCameraCoverage()
+    }
+
+    fun cameraState(): CarMapCameraState? {
+        val activeMap = map
+        if (destroyed || activeMap == null) return null
+        val camera = activeMap.cameraPosition
+        return CarMapCameraState(
+            camera.target.latitude,
+            camera.target.longitude,
+            camera.zoom,
+            camera.azimuth,
+            camera.tilt,
+            mapCenteredOnGps,
+            max(0L, followPausedUntil - SystemClock.elapsedRealtime()),
+        )
+    }
+
+    fun restoreCameraState(state: CarMapCameraState?) {
+        val activeMap = map
+        if (destroyed || activeMap == null || state == null || !state.isValid()) return
+        initialLoadGeneration++
+        activeMap.move(
+            CameraPosition(
+                Point(state.latitude, state.longitude),
+                state.zoom,
+                state.azimuth,
+                state.tilt,
+            ),
+        )
+        mapCenteredOnGps = state.centeredOnGps
+        followPausedUntil = SystemClock.elapsedRealtime() + state.followPauseRemainingMs
+        refreshVisible()
     }
 
     fun moveToCurrentLocation() {
@@ -339,8 +380,11 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         val coverageDiff = CameraMarkerDiff.between(renderedCameras, validPoints)
         val entities = MapMarkerLayout.create(validPoints, activeMap.cameraPosition.zoom)
         val markerDiff = MapMarkerEntityDiff.between(renderedMarkerEntities, entities)
-        val showCoverage = activeMap.cameraPosition.zoom >= COVERAGE_MIN_ZOOM
-        val coverageModeChanged = showCoverage != cameraCoverageVisible
+        val coverageSettings = coverageSettings()
+        val showCoverage = activeMap.cameraPosition.zoom >= COVERAGE_MIN_ZOOM &&
+            coverageSettings.displayMode != ZoneDisplayMode.NONE
+        val coverageModeChanged = showCoverage != cameraCoverageVisible ||
+            coverageSettings != appliedCoverageSettings
         val markerChanges = markerDiff.removeKeys.isNotEmpty() ||
             markerDiff.update.isNotEmpty() || markerDiff.add.isNotEmpty()
         if (!markerChanges && !coverageDiff.hasMarkerChanges() && !coverageModeChanged) return
@@ -360,24 +404,19 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         renderedMarkerEntities.clear()
         renderedMarkerEntities.putAll(markerDiff.desired)
 
-        for (id in coverageDiff.removeIds) removeCameraCoverage(id)
-        for (camera in coverageDiff.addOrReplace) {
-            if (showCoverage && !coverageModeChanged) {
-                renderedCameraCoverage[camera.id] = addCameraCoverage(camera)
+        if (!coverageModeChanged) {
+            for (id in coverageDiff.removeIds) removeCameraCoverage(id)
+            for (camera in coverageDiff.addOrReplace) {
+                if (showCoverage && shouldDisplayCoverage(camera.id, coverageSettings.displayMode)) {
+                    renderedCameraCoverage[camera.id] = addCameraCoverage(camera, coverageSettings)
+                }
             }
         }
         renderedCameras.clear()
         renderedCameras.putAll(coverageDiff.desired)
 
         if (coverageModeChanged) {
-            coverageCollection.clear()
-            renderedCameraCoverage.clear()
-            if (showCoverage) {
-                for (camera in renderedCameras.values) {
-                    renderedCameraCoverage[camera.id] = addCameraCoverage(camera)
-                }
-            }
-            cameraCoverageVisible = showCoverage
+            rebuildCameraCoverage(coverageSettings)
         }
     }
 
@@ -427,8 +466,8 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
 
     private fun individualMarkerStyle(): IconStyle = IconStyle()
         .setAnchor(android.graphics.PointF(0.5f, 0.5f))
-        .setRotationType(RotationType.ROTATE)
-        .setFlat(true)
+        .setRotationType(RotationType.NO_ROTATION)
+        .setFlat(false)
         .setScale(1.0f)
         .setZIndex(10f)
 
@@ -448,11 +487,20 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         for (polygon in coverage) collection.remove(polygon)
     }
 
-    private fun addCameraCoverage(camera: CameraPoint): List<PolygonMapObject> {
+    private fun addCameraCoverage(
+        camera: CameraPoint,
+        settings: CoverageSettings = coverageSettings(),
+    ): List<PolygonMapObject> {
         val result = ArrayList<PolygonMapObject>()
         if (!camera.isCameraOrControl()) return result
         val baseColor = markerColor(if (camera.isObservation()) OBSERVATION_MARKER else camera.type)
-        val colors = MapVisualStyle.coverage(baseColor, camera.id, activeCameraId)
+        val colors = MapVisualStyle.coverage(
+            baseColor,
+            camera.id,
+            activeCameraId,
+            settings.zoneTransparencyPercent,
+            settings.activeZoneTransparencyPercent,
+        )
         val origin = Point(camera.latitude, camera.longitude)
         if (camera.dirType == 0) {
             addCoverageCircle(origin, camera.distanceMeters.toDouble(), colors.fillColor, colors.strokeColor, result)
@@ -485,12 +533,43 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     private fun refreshCoverageStyle(cameraId: Long) {
         val camera = renderedCameras[cameraId] ?: return
         val coverage = renderedCameraCoverage[cameraId] ?: return
+        val settings = coverageSettings()
         val baseColor = markerColor(if (camera.isObservation()) OBSERVATION_MARKER else camera.type)
-        val colors = MapVisualStyle.coverage(baseColor, camera.id, activeCameraId)
+        val colors = MapVisualStyle.coverage(
+            baseColor,
+            camera.id,
+            activeCameraId,
+            settings.zoneTransparencyPercent,
+            settings.activeZoneTransparencyPercent,
+        )
         for (polygon in coverage) {
             polygon.fillColor = colors.fillColor
             polygon.strokeColor = colors.strokeColor
         }
+    }
+
+    private fun rebuildCameraCoverage(settings: CoverageSettings = coverageSettings()) {
+        val activeMap = map ?: return
+        val collection = cameraCoverageCollection ?: return
+        collection.clear()
+        renderedCameraCoverage.clear()
+        val showCoverage = activeMap.cameraPosition.zoom >= COVERAGE_MIN_ZOOM &&
+            settings.displayMode != ZoneDisplayMode.NONE
+        if (showCoverage) {
+            for (camera in renderedCameras.values) {
+                if (shouldDisplayCoverage(camera.id, settings.displayMode)) {
+                    renderedCameraCoverage[camera.id] = addCameraCoverage(camera, settings)
+                }
+            }
+        }
+        cameraCoverageVisible = showCoverage
+        appliedCoverageSettings = settings
+    }
+
+    private fun shouldDisplayCoverage(cameraId: Long, mode: ZoneDisplayMode): Boolean = when (mode) {
+        ZoneDisplayMode.ALL -> true
+        ZoneDisplayMode.ACTIVE_ONLY -> cameraId >= 0L && cameraId == activeCameraId
+        ZoneDisplayMode.NONE -> false
     }
 
     private fun addCoverageCircle(
@@ -717,6 +796,30 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         Context.MODE_PRIVATE,
     )?.getBoolean(AppSettings.AUTO_ROTATE_MAP, AppSettings.DEFAULT_AUTO_ROTATE_MAP) == true
 
+    private fun coverageSettings(): CoverageSettings {
+        val preferences = resourceContext?.getSharedPreferences(
+            AppSettings.PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+        return CoverageSettings(
+            ZoneDisplayMode.fromStored(
+                preferences?.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
+            ),
+            AppSettings.clampZoneTransparency(
+                preferences?.getInt(
+                    AppSettings.ZONE_TRANSPARENCY,
+                    AppSettings.DEFAULT_ZONE_TRANSPARENCY_PERCENT,
+                ) ?: AppSettings.DEFAULT_ZONE_TRANSPARENCY_PERCENT,
+            ),
+            AppSettings.clampZoneTransparency(
+                preferences?.getInt(
+                    AppSettings.ACTIVE_ZONE_TRANSPARENCY,
+                    AppSettings.DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT,
+                ) ?: AppSettings.DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT,
+            ),
+        )
+    }
+
     private fun dp(value: Int): Int = (
         value * checkNotNull(resourceContext).resources.displayMetrics.density
     ).roundToInt()
@@ -731,4 +834,10 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         private const val FOLLOW_PAUSE_MS = 7000L
         private val GREEN = Color.rgb(0, 166, 82)
     }
+
+    private data class CoverageSettings(
+        val displayMode: ZoneDisplayMode,
+        val zoneTransparencyPercent: Int,
+        val activeZoneTransparencyPercent: Int,
+    )
 }

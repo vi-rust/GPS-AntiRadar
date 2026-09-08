@@ -87,6 +87,10 @@ class MainActivity : Activity() {
             )
             AppSettings.THEME_MODE -> refreshThemeIfNeeded()
             AppSettings.OVERSPEED_THRESHOLD -> if (!trackingStopped) renderHud(latestSnapshot)
+            AppSettings.ZONE_TRANSPARENCY,
+            AppSettings.ACTIVE_ZONE_TRANSPARENCY,
+            AppSettings.ZONE_DISPLAY_MODE,
+            -> cameraMapLayer?.refreshCoverageSettings()
         }
     }
 
@@ -514,6 +518,31 @@ class MainActivity : Activity() {
         transparencyContent.addView(transparency, LinearLayout.LayoutParams(-1, dp(42)))
         content.addView(transparencyRow, LinearLayout.LayoutParams(-1, dp(86)))
 
+        content.addView(
+            zoneTransparencyRow(
+                "Прозрачность зон",
+                AppSettings.ZONE_TRANSPARENCY,
+                AppSettings.DEFAULT_ZONE_TRANSPARENCY_PERCENT,
+            ),
+            LinearLayout.LayoutParams(-1, dp(86)),
+        )
+        content.addView(
+            zoneTransparencyRow(
+                "Прозрачность активной зоны",
+                AppSettings.ACTIVE_ZONE_TRANSPARENCY,
+                AppSettings.DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT,
+            ),
+            LinearLayout.LayoutParams(-1, dp(86)),
+        )
+        val zoneDisplayMode = ZoneDisplayMode.fromStored(
+            settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
+        )
+        val zoneDisplay = menuAction(
+            R.drawable.ic_zones,
+            "Отображение зон: ${zoneDisplayMode.title()}",
+        )
+        content.addView(zoneDisplay, LinearLayout.LayoutParams(-1, dp(54)))
+
         val autoRotateRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -572,6 +601,10 @@ class MainActivity : Activity() {
             dialog.dismiss()
             showThemeDialog()
         }
+        zoneDisplay.setOnClickListener {
+            dialog.dismiss()
+            showZoneDisplayDialog()
+        }
         about.setOnClickListener {
             dialog.dismiss()
             showAboutDialog()
@@ -580,6 +613,76 @@ class MainActivity : Activity() {
             dialog.dismiss()
             exitApplication()
         }
+        dialog.show()
+        styleRoundedDialog(dialog)
+    }
+
+    private fun zoneTransparencyRow(
+        label: String,
+        preferenceKey: String,
+        defaultValue: Int,
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_opacity)
+            tintIcon(this)
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        row.addView(controls, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            setMargins(dp(14), 0, 0, 0)
+        })
+        val valueLabel = text("", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(valueLabel)
+        val seekBar = SeekBar(this).apply {
+            max = (AppSettings.MAX_ZONE_TRANSPARENCY_PERCENT -
+                AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT) / AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT
+        }
+        val savedValue = AppSettings.clampZoneTransparency(
+            settingsPreferences.getInt(preferenceKey, defaultValue),
+        )
+        seekBar.progress = (savedValue - AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT) /
+            AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT
+        valueLabel.text = "$label: $savedValue%"
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.clampZoneTransparency(
+                    AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT +
+                        progress * AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT,
+                )
+                valueLabel.text = "$label: $value%"
+                if (fromUser) {
+                    settingsPreferences.edit().putInt(preferenceKey, value).apply()
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
+    }
+
+    private fun showZoneDisplayDialog() {
+        val current = ZoneDisplayMode.fromStored(
+            settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
+        )
+        val modes = ZoneDisplayMode.entries.toTypedArray()
+        val titles = Array(modes.size) { modes[it].title() }
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setTitle("Отображение зон")
+            .setSingleChoiceItems(titles, current.ordinal) { choice, which ->
+                settingsPreferences.edit()
+                    .putString(AppSettings.ZONE_DISPLAY_MODE, modes[which].name)
+                    .apply()
+                choice.dismiss()
+            }
+            .setNegativeButton("Отмена", null)
+            .create()
         dialog.show()
         styleRoundedDialog(dialog)
     }

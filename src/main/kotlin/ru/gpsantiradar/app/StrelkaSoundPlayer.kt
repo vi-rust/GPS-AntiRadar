@@ -6,6 +6,8 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import java.io.IOException
 import java.util.ArrayDeque
 
@@ -17,15 +19,31 @@ class StrelkaSoundPlayer(context: Context) :
     private val context = context.applicationContext
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager?
     private val audioAttributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val queue = ArrayDeque<Clip>()
     private var player: MediaPlayer? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var audioFocusHeld = false
+    private var startScheduled = false
+    private var released = false
+    private val scheduledStart = Runnable {
+        synchronized(this) {
+            startScheduled = false
+            startNextClip()
+        }
+    }
+    private val scheduledFocusAbandon = Runnable {
+        synchronized(this) {
+            if (player == null && queue.isEmpty() && !startScheduled) abandonAudioFocus()
+        }
+    }
 
     @Synchronized
     fun announce(`object`: CameraPoint, distanceMeters: Int, multipleActiveObjects: Boolean) {
+        if (released) return
         if (!multipleActiveObjects) add("alert.mp3", 1f)
         add(typeClip(`object`.type), 1f)
         val limit = `object`.currentSpeedLimit()
@@ -48,7 +66,7 @@ class StrelkaSoundPlayer(context: Context) :
 
     @Synchronized
     fun beepIfIdle(distanceMeters: Int): Boolean {
-        if (player != null || queue.isNotEmpty()) return false
+        if (released || player != null || queue.isNotEmpty() || startScheduled) return false
         add("beep.mp3", StrelkaAlertAlgorithm.beepVolume(distanceMeters))
         playNextIfIdle()
         return true
@@ -56,9 +74,10 @@ class StrelkaSoundPlayer(context: Context) :
 
     @Synchronized
     fun objectFinished(`object`: CameraPoint) {
+        if (released) return
         if (`object`.isCameraOrControl() && !`object`.isAverageSpeed()) {
             add("cam_stop_voice.mp3", 1f)
-            playNextIfIdle()
+            playNextIfIdle(AUDIO_ROUTE_WARMUP_MS)
         }
     }
 
@@ -76,25 +95,38 @@ class StrelkaSoundPlayer(context: Context) :
     }
 
     private fun requestAudioFocus() {
-        val manager = audioManager ?: return
+        if (audioFocusHeld) return
+        val manager = audioManager ?: run {
+            audioFocusHeld = true
+            return
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(audioAttributes)
                 .build()
             focusRequest = request
-            manager.requestAudioFocus(request)
+            audioFocusHeld = manager.requestAudioFocus(request) ==
+                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         } else {
             @Suppress("DEPRECATION")
-            manager.requestAudioFocus(
+            audioFocusHeld = manager.requestAudioFocus(
                 null,
                 AudioManager.STREAM_MUSIC,
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
-            )
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         }
     }
 
     private fun abandonAudioFocus() {
-        val manager = audioManager ?: return
+        val manager = audioManager ?: run {
+            audioFocusHeld = false
+            focusRequest = null
+            return
+        }
+        if (!audioFocusHeld) {
+            focusRequest = null
+            return
+        }
         val request = focusRequest
         if (Build.VERSION.SDK_INT >= 26 && request != null) {
             manager.abandonAudioFocusRequest(request)
@@ -103,16 +135,33 @@ class StrelkaSoundPlayer(context: Context) :
             @Suppress("DEPRECATION")
             manager.abandonAudioFocus(null)
         }
+        audioFocusHeld = false
     }
 
     @Synchronized
-    private fun playNextIfIdle() {
-        if (player != null) return
-        val clip = queue.poll() ?: run {
-            abandonAudioFocus()
+    private fun playNextIfIdle(warmupMs: Long = 0L) {
+        if (released || player != null || startScheduled) return
+        mainHandler.removeCallbacks(scheduledFocusAbandon)
+        if (queue.isEmpty()) {
+            scheduleAudioFocusAbandon()
             return
         }
+        val acquiredNow = !audioFocusHeld
         requestAudioFocus()
+        if (acquiredNow && warmupMs > 0L) {
+            startScheduled = true
+            mainHandler.postDelayed(scheduledStart, warmupMs)
+        } else {
+            startNextClip()
+        }
+    }
+
+    private fun startNextClip() {
+        if (released || player != null) return
+        val clip = queue.poll() ?: run {
+            scheduleAudioFocusAbandon()
+            return
+        }
         val next = MediaPlayer()
         player = next
         next.setAudioAttributes(audioAttributes)
@@ -134,7 +183,17 @@ class StrelkaSoundPlayer(context: Context) :
         }
     }
 
+    private fun scheduleAudioFocusAbandon() {
+        mainHandler.removeCallbacks(scheduledFocusAbandon)
+        mainHandler.postDelayed(scheduledFocusAbandon, AUDIO_FOCUS_RELEASE_DELAY_MS)
+    }
+
+    @Synchronized
     override fun onPrepared(mediaPlayer: MediaPlayer) {
+        if (released || mediaPlayer !== player) {
+            releasePlayer(mediaPlayer)
+            return
+        }
         try {
             mediaPlayer.start()
         } catch (_: IllegalStateException) {
@@ -144,12 +203,20 @@ class StrelkaSoundPlayer(context: Context) :
 
     @Synchronized
     override fun onCompletion(mediaPlayer: MediaPlayer) {
+        if (mediaPlayer !== player) {
+            releasePlayer(mediaPlayer)
+            return
+        }
         releaseCurrent()
         playNextIfIdle()
     }
 
     @Synchronized
     override fun onError(mediaPlayer: MediaPlayer, what: Int, extra: Int): Boolean {
+        if (mediaPlayer !== player) {
+            releasePlayer(mediaPlayer)
+            return true
+        }
         releaseCurrent()
         playNextIfIdle()
         return true
@@ -157,6 +224,11 @@ class StrelkaSoundPlayer(context: Context) :
 
     @Synchronized
     fun release() {
+        if (released) return
+        released = true
+        mainHandler.removeCallbacks(scheduledStart)
+        mainHandler.removeCallbacks(scheduledFocusAbandon)
+        startScheduled = false
         queue.clear()
         releaseCurrent()
         abandonAudioFocus()
@@ -164,17 +236,23 @@ class StrelkaSoundPlayer(context: Context) :
 
     private fun releaseCurrent() {
         val current = player ?: return
+        releasePlayer(current)
+        player = null
+    }
+
+    private fun releasePlayer(current: MediaPlayer) {
         try {
             current.release()
         } catch (_: RuntimeException) {
             // The player is already released.
         }
-        player = null
     }
 
     private data class Clip(val name: String, val volume: Float)
 
     companion object {
+        private const val AUDIO_ROUTE_WARMUP_MS = 400L
+        private const val AUDIO_FOCUS_RELEASE_DELAY_MS = 250L
         private val SPOKEN_SPEEDS = setOf(20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130)
     }
 }

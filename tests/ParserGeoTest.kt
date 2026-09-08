@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @Throws(Exception::class)
  fun main(args:Array<String?>?) {
 verifyCarSurfaceSpec()
+verifyCarMapCameraState()
 verifyCarStartupDecision()
 verifyThemeResolution()
 verifyMapVisualStyle()
@@ -184,6 +185,16 @@ check((AppSettings.clampHudTransparency(-5) == 0
 && AppSettings.adjustHudTransparency(12, -1) == 5
 && AppSettings.adjustHudTransparency(90, -1) == 75),
 "HUD transparency floors to its step grid before adjustment")
+check((AppSettings.clampZoneTransparency(0) == 10
+&& AppSettings.clampZoneTransparency(88) == 85
+&& AppSettings.clampZoneTransparency(100) == 90
+&& AppSettings.adjustZoneTransparency(10, -1) == 10
+&& AppSettings.adjustZoneTransparency(85, 1) == 90),
+"zone transparency uses 10..90 with a 5 percent step")
+check(ZoneDisplayMode.fromStored(null) == ZoneDisplayMode.ALL
+&& ZoneDisplayMode.fromStored("ACTIVE_ONLY") == ZoneDisplayMode.ACTIVE_ONLY
+&& ZoneDisplayMode.fromStored("invalid") == ZoneDisplayMode.ALL,
+"zone display mode defaults safely to all zones")
 if (args!!.size > 0)
 {
 val count = intArrayOf(0)
@@ -221,10 +232,25 @@ val blue = MapVisualStyle.coverage(
 -0xdc9024, 2481004L, 2481003L)
 check(blue!!.fillColor == 0x26236FDC && blue!!.strokeColor == 0x4D236FDC,
 "each inactive zone keeps the original color of its object type")
+val configured = MapVisualStyle.coverage(
+-0x23c8d0, 2481003L, 2481003L, 90, 10)
+check(configured!!.fillColor == 0xE6DC3730.toInt(),
+"active zone uses configured fill transparency")
+check(configured!!.strokeColor == 0xFFDC3730.toInt(),
+"zone border stays 15 percentage points more visible")
 check((MapVisualStyle.locationPrimaryColor(false) == -0xe6892e && MapVisualStyle.locationHighlightColor(false) == -0x9b4a0a),
 "day current-location arrow uses the blue palette")
 check((MapVisualStyle.locationPrimaryColor(true) == -0x4200 && MapVisualStyle.locationHighlightColor(true) == -0x27b8),
 "night current-location arrow restores the original yellow palette")
+}
+
+private fun verifyCarMapCameraState() {
+check(CarMapCameraState(55.75, 37.61, 16f, 0f, 0f, true, 0L).isValid(),
+"valid car camera state is accepted")
+check(!CarMapCameraState(95.0, 37.61, 16f, 0f, 0f, true, 0L).isValid(),
+"invalid car camera latitude is rejected")
+check(!CarMapCameraState(55.75, 37.61, 25f, 0f, 0f, true, 0L).isValid(),
+"invalid car camera zoom is rejected")
 }
 
 private fun verifyCarStartupDecision() {
@@ -378,8 +404,8 @@ if (!condition) throw AssertionError(message)
 }
 
 private fun verifyCarMenuItems() {
-check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.MAPKIT_KEY, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
-"car menu exposes all eight actions in display order")
+check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY, CarMenuItem.ZONE_DISPLAY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.MAPKIT_KEY, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
+"car menu exposes all actions in display order")
 }
 
 private fun verifyMapOrientation() {
@@ -567,33 +593,34 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 13, "about dialog contains every known release")
-check((releases!!.get(0).version.equals("4.9.9")
-&& releases!!.get(1).version.equals("4.9.8")
-&& releases!!.get(2).version.equals("4.9.7")
-&& releases!!.get(3).version.equals("4.9.6")
-&& releases!!.get(4).version.equals("4.9.5")
-&& releases!!.get(5).version.equals("4.9.4")
-&& releases!!.get(6).version.equals("4.9.3")
-&& releases!!.get(7).version.equals("4.9.2")
-&& releases!!.get(8).version.equals("4.9.1")
-&& releases!!.get(9).version.equals("4.9.0")
-&& releases!!.get(10).version.equals("4.8.1")
-&& releases!!.get(11).version.equals("4.8.0")
-&& releases!!.get(12).version.equals("4.7.1")),
+check(releases!!.size == 14, "about dialog contains every known release")
+check((releases!!.get(0).version.equals("4.9.10")
+&& releases!!.get(1).version.equals("4.9.9")
+&& releases!!.get(2).version.equals("4.9.8")
+&& releases!!.get(3).version.equals("4.9.7")
+&& releases!!.get(4).version.equals("4.9.6")
+&& releases!!.get(5).version.equals("4.9.5")
+&& releases!!.get(6).version.equals("4.9.4")
+&& releases!!.get(7).version.equals("4.9.3")
+&& releases!!.get(8).version.equals("4.9.2")
+&& releases!!.get(9).version.equals("4.9.1")
+&& releases!!.get(10).version.equals("4.9.0")
+&& releases!!.get(11).version.equals("4.8.1")
+&& releases!!.get(12).version.equals("4.8.0")
+&& releases!!.get(13).version.equals("4.7.1")),
 "release history is newest first")
 for (release in releases!!)
 {
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.9")
+val current = ReleaseHistory.find("4.9.10")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("Kotlin")
-&& current!!.changes.contains("Gradle Kotlin DSL")
-&& current!!.changes.contains("src/main/kotlin")),
-"current release describes the Kotlin migration")
+check((current!!.changes.contains("прозрачности")
+&& current!!.changes.contains("Android Auto")
+&& current!!.changes.contains("масштаб")),
+"current release describes zone and Android Auto changes")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

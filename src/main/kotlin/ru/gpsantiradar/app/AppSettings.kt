@@ -13,6 +13,9 @@ object AppSettings {
     const val MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5"
     const val MAPKIT_KEY_REENTRY = "mapkit_key_reentry_v6"
     const val HUD_TRANSPARENCY = "hud_transparency"
+    const val ZONE_TRANSPARENCY = "zone_transparency"
+    const val ACTIVE_ZONE_TRANSPARENCY = "active_zone_transparency"
+    const val ZONE_DISPLAY_MODE = "zone_display_mode"
     const val AUTO_ROTATE_MAP = "auto_rotate_map"
     const val THEME_MODE = "theme_mode"
     const val THEME_LATITUDE = "theme_latitude"
@@ -28,6 +31,11 @@ object AppSettings {
     const val MIN_HUD_TRANSPARENCY_PERCENT = 0
     const val MAX_HUD_TRANSPARENCY_PERCENT = 80
     const val HUD_TRANSPARENCY_STEP_PERCENT = 5
+    const val DEFAULT_ZONE_TRANSPARENCY_PERCENT = 85
+    const val DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT = 70
+    const val MIN_ZONE_TRANSPARENCY_PERCENT = 10
+    const val MAX_ZONE_TRANSPARENCY_PERCENT = 90
+    const val ZONE_TRANSPARENCY_STEP_PERCENT = 5
 
     fun clampOverspeedThreshold(value: Int): Int =
         max(MIN_OVERSPEED_THRESHOLD_KMH, min(MAX_OVERSPEED_THRESHOLD_KMH, value))
@@ -40,6 +48,17 @@ object AppSettings {
 
     fun adjustHudTransparency(value: Int, direction: Int): Int =
         clampHudTransparency(clampHudTransparency(value) + direction.sign * HUD_TRANSPARENCY_STEP_PERCENT)
+
+    fun clampZoneTransparency(value: Int): Int =
+        floorToStep(
+            value,
+            MIN_ZONE_TRANSPARENCY_PERCENT,
+            MAX_ZONE_TRANSPARENCY_PERCENT,
+            ZONE_TRANSPARENCY_STEP_PERCENT,
+        )
+
+    fun adjustZoneTransparency(value: Int, direction: Int): Int =
+        clampZoneTransparency(clampZoneTransparency(value) + direction.sign * ZONE_TRANSPARENCY_STEP_PERCENT)
 
     private fun floorToStep(value: Int, minValue: Int, maxValue: Int, step: Int): Int {
         val clamped = max(minValue, min(maxValue, value))

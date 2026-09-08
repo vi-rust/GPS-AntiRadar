@@ -15,7 +15,7 @@ import androidx.core.graphics.drawable.IconCompat
 class CarValueScreen internal constructor(
     carContext: CarContext,
     private val setting: Setting,
-    hudTransparencyRefresh: Runnable?,
+    settingChanged: Runnable?,
 ) : Screen(carContext) {
     enum class Setting(
         private val preferenceKey: String,
@@ -40,6 +40,22 @@ class CarValueScreen internal constructor(
             AppSettings.MIN_HUD_TRANSPARENCY_PERCENT,
             AppSettings.MAX_HUD_TRANSPARENCY_PERCENT,
             AppSettings.HUD_TRANSPARENCY_STEP_PERCENT,
+        ),
+        ZONE_TRANSPARENCY(
+            AppSettings.ZONE_TRANSPARENCY,
+            "Прозрачность зон",
+            AppSettings.DEFAULT_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.MAX_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT,
+        ),
+        ACTIVE_ZONE_TRANSPARENCY(
+            AppSettings.ACTIVE_ZONE_TRANSPARENCY,
+            "Прозрачность активной зоны",
+            AppSettings.DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.MAX_ZONE_TRANSPARENCY_PERCENT,
+            AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT,
         );
 
         fun preferenceKey(): String = preferenceKey
@@ -52,20 +68,23 @@ class CarValueScreen internal constructor(
         fun normalize(value: Int): Int = when (this) {
             OVERSPEED_THRESHOLD -> AppSettings.clampOverspeedThreshold(value)
             HUD_TRANSPARENCY -> AppSettings.clampHudTransparency(value)
+            ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY -> AppSettings.clampZoneTransparency(value)
         }
 
         fun adjust(value: Int, direction: Int): Int = when (this) {
             OVERSPEED_THRESHOLD -> AppSettings.adjustOverspeedThreshold(value, direction)
             HUD_TRANSPARENCY -> AppSettings.adjustHudTransparency(value, direction)
+            ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY ->
+                AppSettings.adjustZoneTransparency(value, direction)
         }
 
         fun format(value: Int): String = when (this) {
             OVERSPEED_THRESHOLD -> "${normalize(value)} км/ч"
-            HUD_TRANSPARENCY -> "${normalize(value)}%"
+            HUD_TRANSPARENCY, ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY -> "${normalize(value)}%"
         }
     }
 
-    private val hudTransparencyRefresh = hudTransparencyRefresh ?: NO_OP
+    private val settingChanged = settingChanged ?: NO_OP
     private val preferences: SharedPreferences = carContext.getSharedPreferences(
         AppSettings.PREFERENCES,
         Context.MODE_PRIVATE,
@@ -78,7 +97,7 @@ class CarValueScreen internal constructor(
     ) : this(
         carContext,
         setting,
-        if (surfaceController == null) NO_OP else Runnable { surfaceController.refreshHudTransparency() },
+        refreshAction(setting, surfaceController),
     )
 
     override fun onGetTemplate(): Template {
@@ -118,11 +137,26 @@ class CarValueScreen internal constructor(
     private fun changeValue(direction: Int) {
         val adjusted = setting.adjust(currentValue(), direction)
         preferences.edit().putInt(setting.preferenceKey(), adjusted).commit()
-        if (setting == Setting.HUD_TRANSPARENCY) hudTransparencyRefresh.run()
+        settingChanged.run()
         invalidate()
     }
 
     companion object {
         private val NO_OP = Runnable {}
+
+        private fun refreshAction(
+            setting: Setting,
+            surfaceController: CarSurfaceController?,
+        ): Runnable = when {
+            surfaceController == null -> NO_OP
+            setting == Setting.HUD_TRANSPARENCY -> Runnable {
+                surfaceController.refreshHudTransparency()
+            }
+            setting == Setting.ZONE_TRANSPARENCY ||
+                setting == Setting.ACTIVE_ZONE_TRANSPARENCY -> Runnable {
+                surfaceController.refreshCoverageSettings()
+            }
+            else -> NO_OP
+        }
     }
 }

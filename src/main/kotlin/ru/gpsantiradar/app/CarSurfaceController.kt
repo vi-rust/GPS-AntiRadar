@@ -34,6 +34,9 @@ class CarSurfaceController internal constructor(
         fun onDrivingSnapshot(snapshot: DrivingSnapshot)
         fun onDatabaseCount(count: Int) {}
         fun onTrackingStopped() {}
+        fun cameraState(): CarMapCameraState? = null
+        fun restoreCameraState(state: CarMapCameraState?) {}
+        fun refreshCoverageSettings() {}
         fun refreshVisible()
         fun zoomBy(delta: Float)
         fun recenter()
@@ -57,6 +60,7 @@ class CarSurfaceController internal constructor(
     private var trackingStopped = false
     private var panMode = false
     private var destroyed = false
+    private var retainedCameraState: CarMapCameraState? = null
 
     constructor(carContext: CarContext?, application: GpsAntiRadarApplication?) : this(
         carContext,
@@ -131,6 +135,7 @@ class CarSurfaceController internal constructor(
             surfaceResource = created
             activeSurface = surface
             activeSpec = spec
+            created.restoreCameraState(retainedCameraState)
             created.onCarConfigurationChanged()
             created.setPanMode(panMode)
             created.onDrivingSnapshot(latestSnapshot)
@@ -258,6 +263,11 @@ class CarSurfaceController internal constructor(
     }
 
     @Synchronized
+    fun refreshCoverageSettings() {
+        if (!destroyed) surfaceResource?.refreshCoverageSettings()
+    }
+
+    @Synchronized
     fun destroy() {
         if (destroyed) return
         destroyed = true
@@ -268,6 +278,7 @@ class CarSurfaceController internal constructor(
     private fun releaseResource(releaseSurface: Boolean) {
         val existing = surfaceResource
         val surface = activeSurface
+        existing?.cameraState()?.let { retainedCameraState = it }
         surfaceResource = null
         activeSurface = null
         activeSpec = null
@@ -368,8 +379,16 @@ class CarSurfaceController internal constructor(
         override fun onTrackingStopped() {
             if (!released) content?.onTrackingStopped()
         }
+        override fun cameraState(): CarMapCameraState? =
+            if (released) null else content?.cameraState()
+        override fun restoreCameraState(state: CarMapCameraState?) {
+            if (!released) content?.restoreCameraState(state)
+        }
         override fun refreshVisible() {
             if (!released) content?.refreshVisible()
+        }
+        override fun refreshCoverageSettings() {
+            if (!released) content?.refreshCoverageSettings()
         }
         override fun zoomBy(delta: Float) {
             if (!released) content?.zoomBy(delta)

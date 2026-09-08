@@ -42,16 +42,17 @@ $RequiredSources = @(
     "DrivingSnapshot", "DrivingSnapshotIntent", "Geo", "GpsAntiRadarApplication",
     "MainActivity", "MapMarkerLayout", "MapVisualStyle", "RadarBaseParser",
     "RadarBaseUpdater", "SharedCameraMapLayer", "StrelkaAlertAlgorithm",
-    "StrelkaAlertTracker", "TrackingService", "GpsCarAppService", "GpsCarSession",
+    "StrelkaAlertTracker", "StrelkaSoundPlayer", "TrackingService", "GpsCarAppService", "GpsCarSession",
     "CarSurfaceController", "CarMapPresentation", "CarMapGestureController",
     "CarMapScreen", "CarMenuScreen", "CarValueScreen", "CarMapKeyScreen",
-    "CarAboutScreen"
+    "CarAboutScreen", "ZoneDisplayMode", "CarZoneDisplayScreen", "CarMapCameraState"
 )
 foreach ($Name in $RequiredSources) { [void](Read-Source $Name) }
 
 $Database = Read-Source "CameraDatabase"
 $Tracking = Read-Source "TrackingService"
 $Algorithm = Read-Source "StrelkaAlertAlgorithm"
+$SoundPlayer = Read-Source "StrelkaSoundPlayer"
 $Activity = Read-Source "MainActivity"
 $Application = Read-Source "GpsAntiRadarApplication"
 $SharedMapLayer = Read-Source "SharedCameraMapLayer"
@@ -88,14 +89,23 @@ if ($TrackerUpdate -lt 0 -or $GateAccept -lt $TrackerUpdate) {
 Assert-Contains $Tracking 'HeadingSelection\.forStrelka\(' "Tracking must separate visual and alert headings"
 Assert-Contains $Tracking 'headings\.visualHeading' "Map updates must use the immediate visual heading"
 Assert-Contains $Algorithm 'speedKmh > limit \+ AppSettings\.clampOverspeedThreshold\(thresholdKmh\)' "Overspeed threshold must remain strict and non-inclusive"
+Assert-Contains $SoundPlayer 'USAGE_ASSISTANCE_NAVIGATION_GUIDANCE' "Voice alerts must use navigation-guidance audio routing"
+Assert-Contains $SoundPlayer 'playNextIfIdle\(AUDIO_ROUTE_WARMUP_MS\)' "The short object-finished phrase must allow the car audio route to open"
+Assert-Contains $SoundPlayer 'scheduleAudioFocusAbandon\(\)' "Audio focus must remain active briefly after playback"
 
 Assert-Contains $SharedMapLayer 'val latPadding = \(north - south\) \* 0\.20' "Latitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'val lonPadding = \(east - west\) \* 0\.20' "Longitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'MapMarkerEntityDiff\.between' "Map markers must remain incremental"
-Assert-Contains $SharedMapLayer 'MapVisualStyle\.coverage\(baseColor, camera\.id, activeCameraId\)' "Coverage style must depend on the active camera"
-Assert-Contains $SharedMapLayer 'refreshCoverageStyle\(previousActiveCameraId\)[\s\S]*refreshCoverageStyle\(activeCameraId\)' "Old and new active coverage must both be restyled"
+Assert-Contains $SharedMapLayer 'MapVisualStyle\.coverage\([\s\S]*?camera\.id,[\s\S]*?activeCameraId' "Coverage style must depend on the active camera"
+Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.ACTIVE_ONLY' "Coverage must support active-only display"
+Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.NONE' "Coverage must support hiding all zones"
+Assert-Contains $SharedMapLayer 'AppSettings\.ZONE_TRANSPARENCY' "Coverage must use shared transparency settings"
 Assert-Contains $SharedMapLayer 'MapVisualStyle\.locationPrimaryColor\(nightMode\)' "Location arrow must follow the map theme"
 Assert-Contains $SharedMapLayer 'AppSettings\.AUTO_ROTATE_MAP' "Map rotation must use the shared setting"
+Assert-Contains $SharedMapLayer 'fun cameraState\(\): CarMapCameraState\?' "Shared map must expose restorable camera state"
+Assert-Contains $SharedMapLayer 'initialLoadGeneration\+\+' "Restoring a camera must cancel stale initial positioning"
+Assert-Contains $SharedMapLayer 'individualMarkerStyle\(\): IconStyle = IconStyle\(\)[\s\S]*?setRotationType\(RotationType\.NO_ROTATION\)[\s\S]*?setFlat\(false\)' "Object icons must stay upright when the map rotates"
+Assert-Contains $SharedMapLayer 'locationMarkerStyle\(\): IconStyle = IconStyle\(\)[\s\S]*?setRotationType\(RotationType\.ROTATE\)[\s\S]*?setFlat\(true\)' "The current-location arrow must keep following its heading"
 Assert-Contains $SharedMapLayer 'removeCameraListener' "Destroy must remove the camera listener"
 Assert-Contains $SharedMapLayer 'MapMarkerHitTest\.nearest' "Projected taps must use the shared hit test"
 
@@ -105,6 +115,8 @@ Assert-Contains $Activity 'DrivingHudPresentation\.from' "Phone HUD must use sha
 Assert-Contains $Activity 'registerOnSharedPreferenceChangeListener' "Phone HUD must observe shared settings"
 Assert-Contains $Activity 'applyImmersiveMode\(\)' "Phone must retain immersive mode"
 Assert-Contains $Activity 'radarBaseUpdater\(\)\.requestUpdate\(\)' "Phone update action must use the application updater"
+Assert-Contains $Activity 'AppSettings\.ZONE_TRANSPARENCY' "Phone menu must expose zone transparency"
+Assert-Contains $Activity 'AppSettings\.ZONE_DISPLAY_MODE' "Phone menu must expose zone visibility"
 
 Assert-Contains $Application 'RadarBaseUpdateSingleFlight\(' "Application must own the process update guard"
 Assert-Contains $Application 'radarBaseUpdater\.requestUpdate\(\)' "Application must request the cold-start update"
@@ -126,6 +138,8 @@ Assert-Contains $SurfaceController 'createVirtualDisplay' "Car surface must use 
 Assert-Contains $SurfaceController 'Presentation\(' "Car surface must use Presentation"
 Assert-Contains $SurfaceController 'releaseResource\(false\)' "A resized exact Surface wrapper must be preserved for recreation"
 Assert-Contains $SurfaceController 'notifySurfaceFailure\(error\)' "Surface failures must be reported"
+Assert-Contains $SurfaceController 'existing\?\.cameraState\(\)' "Car surface recreation must retain camera state"
+Assert-Contains $SurfaceController 'created\.restoreCameraState\(retainedCameraState\)' "Car surface recreation must restore camera state"
 
 Assert-Contains $CarPresentation 'SharedCameraMapLayer\(' "Car presentation must use the shared map layer"
 Assert-Contains $CarPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
@@ -139,6 +153,7 @@ Assert-Contains $CarGestures 'target\.tapCameraAt\(x, y\)' "Camera taps must be 
 Assert-Contains $CarMenu 'TrackingService\.requestStop\(carContext\)' "Car exit must stop the shared tracker"
 Assert-Contains $CarValue 'AppSettings\.adjustOverspeedThreshold' "Car settings must reuse shared overspeed rules"
 Assert-Contains $CarValue 'AppSettings\.adjustHudTransparency' "Car settings must reuse shared transparency rules"
+Assert-Contains $CarValue 'AppSettings\.adjustZoneTransparency' "Car settings must reuse shared zone transparency rules"
 Assert-Contains $CarValue '\.commit\(\)' "Car numeric settings must be synchronous"
 Assert-Contains $CarMapKey 'SearchTemplate\.Builder' "Car MapKit key input must use SearchTemplate"
 Assert-Contains $CarMapKey '\.trim\(\)' "Car MapKit key must be trimmed"
@@ -151,8 +166,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*44' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.9"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*45' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.10"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },
