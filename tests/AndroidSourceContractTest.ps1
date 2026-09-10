@@ -90,7 +90,7 @@ Assert-Contains $Tracking 'HeadingSelection\.forStrelka\(' "Tracking must separa
 Assert-Contains $Tracking 'headings\.visualHeading' "Map updates must use the immediate visual heading"
 Assert-Contains $Algorithm 'speedKmh > limit \+ AppSettings\.clampOverspeedThreshold\(thresholdKmh\)' "Overspeed threshold must remain strict and non-inclusive"
 Assert-Contains $SoundPlayer 'USAGE_ASSISTANCE_NAVIGATION_GUIDANCE' "Voice alerts must use navigation-guidance audio routing"
-Assert-Contains $SoundPlayer 'playNextIfIdle\(AUDIO_ROUTE_WARMUP_MS\)' "The short object-finished phrase must allow the car audio route to open"
+Assert-Contains $SoundPlayer 'add\("cam_stop_voice\.mp3", 1f\)[\s\S]*playNextIfIdle\(\)' "The object-finished phrase must follow the common sound queue rules"
 Assert-Contains $SoundPlayer 'scheduleAudioFocusAbandon\(\)' "Audio focus must remain active briefly after playback"
 
 Assert-Contains $SharedMapLayer 'val latPadding = \(north - south\) \* 0\.20' "Latitude viewport padding must remain 20 percent"
