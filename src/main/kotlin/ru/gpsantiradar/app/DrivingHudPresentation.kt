@@ -8,6 +8,7 @@ class DrivingHudPresentation private constructor(
     val distanceText: String,
     val cameraText: String,
     val speedColor: Int,
+    val hasObject: Boolean,
     val hasActiveObject: Boolean
 ) {
     companion object {
@@ -18,19 +19,20 @@ class DrivingHudPresentation private constructor(
         fun from(snapshot: DrivingSnapshot) = from(snapshot, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH)
 
         fun from(snapshot: DrivingSnapshot, overspeedThresholdKmh: Int): DrivingHudPresentation {
-            val hasActiveObject = snapshot.hasObject()
+            val hasObject = snapshot.hasObject()
+            val hasActiveObject = snapshot.hasActiveCamera()
             val speedColor = color(snapshot, hasActiveObject, overspeedThresholdKmh)
             val distanceText = if (snapshot.distanceMeters < 0) "—" else formatDistance(snapshot.distanceMeters)
-            val cameraText = if (hasActiveObject) snapshot.cameraName + limitSuffix(snapshot.speedLimitKmh)
+            val cameraText = if (hasObject) snapshot.cameraName + limitSuffix(snapshot.speedLimitKmh)
                 else "Объектов впереди нет"
             return DrivingHudPresentation(
-                snapshot.speedKmh.roundToInt().toString(), distanceText, cameraText, speedColor, hasActiveObject
+                snapshot.speedKmh.roundToInt().toString(), distanceText, cameraText, speedColor,
+                hasObject, hasActiveObject,
             )
         }
 
         private fun color(snapshot: DrivingSnapshot, hasActiveObject: Boolean, overspeedThresholdKmh: Int): Int {
-            if (!hasActiveObject || snapshot.distanceMeters > snapshot.alertDistanceMeters ||
-                snapshot.speedLimitKmh <= 0 || snapshot.speedKmh < snapshot.speedLimitKmh
+            if (!hasActiveObject || snapshot.speedLimitKmh <= 0 || snapshot.speedKmh < snapshot.speedLimitKmh
             ) return COLOR_GREEN
             val threshold = AppSettings.clampOverspeedThreshold(overspeedThresholdKmh)
             return if (snapshot.speedKmh >= snapshot.speedLimitKmh + threshold) COLOR_OVERSPEED else COLOR_ALERT

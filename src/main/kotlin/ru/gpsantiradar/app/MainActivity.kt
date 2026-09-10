@@ -124,7 +124,7 @@ class MainActivity : Activity() {
             }
             renderHud(snapshot)
             cameraMapLayer?.let { layer ->
-                layer.updateActiveCamera(snapshot.cameraId)
+                layer.updateActiveCameras(snapshot.activeCameraIds)
                 layer.updateCurrentLocation(
                     snapshot.latitude,
                     snapshot.longitude,
@@ -1094,7 +1094,7 @@ class MainActivity : Activity() {
         speedView.text = presentation.speedText
         speedView.setTextColor(presentation.speedColor)
         distanceView.text = presentation.distanceText
-        cameraView.text = if (databaseEmpty && !presentation.hasActiveObject) {
+        cameraView.text = if (databaseEmpty && !presentation.hasObject) {
             "База объектов пуста — обновите RadarBase"
         } else {
             presentation.cameraText
@@ -1111,7 +1111,7 @@ class MainActivity : Activity() {
         distanceView.text = "—"
         cameraView.text = "Антирадар остановлен"
         cameraView.setTextColor(GREEN)
-        cameraMapLayer?.updateActiveCamera(-1L)
+        cameraMapLayer?.updateActiveCameras(longArrayOf())
     }
 
     private fun text(value: String, sp: Int, color: Int, style: Int): TextView =

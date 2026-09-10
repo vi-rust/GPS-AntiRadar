@@ -20,11 +20,11 @@ object MapVisualStyle {
     fun coverage(
         baseColor: Int,
         cameraId: Long,
-        activeCameraId: Long,
+        activeCameraIds: Set<Long>,
         zoneTransparencyPercent: Int = AppSettings.DEFAULT_ZONE_TRANSPARENCY_PERCENT,
         activeZoneTransparencyPercent: Int = AppSettings.DEFAULT_ACTIVE_ZONE_TRANSPARENCY_PERCENT,
     ): Coverage {
-        val active = cameraId >= 0L && cameraId == activeCameraId
+        val active = cameraId >= 0L && cameraId in activeCameraIds
         val fillTransparency = AppSettings.clampZoneTransparency(
             if (active) activeZoneTransparencyPercent else zoneTransparencyPercent,
         )

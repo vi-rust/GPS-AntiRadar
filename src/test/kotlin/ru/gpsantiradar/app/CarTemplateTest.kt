@@ -59,12 +59,12 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.10", BuildConfig.VERSION_NAME)
+assertEquals("4.9.11", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("прозрачности"))
+assertTrue(release!!.changes.contains("подтверждённого"))
 assertTrue(release!!.changes.contains("Android Auto"))
-assertTrue(release!!.changes.contains("масштаб"))
+assertTrue(release!!.changes.contains("HUD"))
 }
 
 @Test @Throws(Exception::class)
@@ -152,6 +152,7 @@ val update = Intent(TrackingService.ACTION_UPDATE)
 .putExtra(TrackingService.EXTRA_DISTANCE, 500)
 .putExtra(TrackingService.EXTRA_CAMERA, "Камера")
 .putExtra(TrackingService.EXTRA_CAMERA_ID, 42L)
+.putExtra(TrackingService.EXTRA_ACTIVE_CAMERA_IDS, longArrayOf(42L))
 .putExtra(TrackingService.EXTRA_LIMIT, 60)
 .putExtra(TrackingService.EXTRA_ALERT_DISTANCE, 500)
 
@@ -171,7 +172,7 @@ val presentation = CarMapPresentation(context, null, carContext())
 
 presentation.onDrivingSnapshot(DrivingSnapshot(
 64f, Float.NaN, 500, "Камера", 42L, 60, 800,
-Double.NaN, Double.NaN, Float.NaN, "", ""))
+Double.NaN, Double.NaN, Float.NaN, "", "", longArrayOf(42L)))
 
 val speed = findText(presentation.rootView(), "64")
 assertTrue(speed != null)

@@ -15,6 +15,7 @@ object DrivingSnapshotIntent {
         intent.getDoubleExtra(TrackingService.EXTRA_LONGITUDE, Double.NaN),
         intent.getFloatExtra(TrackingService.EXTRA_HEADING, Float.NaN),
         intent.getStringExtra(TrackingService.EXTRA_ALERT_STATE),
-        intent.getStringExtra(TrackingService.EXTRA_ALERT_ALGORITHM)
+        intent.getStringExtra(TrackingService.EXTRA_ALERT_ALGORITHM),
+        intent.getLongArrayExtra(TrackingService.EXTRA_ACTIVE_CAMERA_IDS),
     )
 }

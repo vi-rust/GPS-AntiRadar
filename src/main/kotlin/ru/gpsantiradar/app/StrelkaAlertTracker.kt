@@ -82,6 +82,7 @@ class StrelkaAlertTracker {
         val exited = exited.toList()
         private val active = active.toList()
         val activeCount = active.size
+        val activeCameraIds: LongArray = active.map { it.`object`.id }.toLongArray()
         fun overspeedCandidate(speedKmh: Float) = overspeedCandidate(speedKmh, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH)
         fun overspeedCandidate(speedKmh: Float, thresholdKmh: Int): State? =
             active.firstOrNull { it.spoken && StrelkaAlertAlgorithm.isOverspeeding(it.`object`, speedKmh, thresholdKmh) }

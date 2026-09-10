@@ -96,7 +96,7 @@ Assert-Contains $SoundPlayer 'scheduleAudioFocusAbandon\(\)' "Audio focus must r
 Assert-Contains $SharedMapLayer 'val latPadding = \(north - south\) \* 0\.20' "Latitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'val lonPadding = \(east - west\) \* 0\.20' "Longitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'MapMarkerEntityDiff\.between' "Map markers must remain incremental"
-Assert-Contains $SharedMapLayer 'MapVisualStyle\.coverage\([\s\S]*?camera\.id,[\s\S]*?activeCameraId' "Coverage style must depend on the active camera"
+Assert-Contains $SharedMapLayer 'MapVisualStyle\.coverage\([\s\S]*?camera\.id,[\s\S]*?activeCameraIds' "Coverage style must depend on every confirmed active camera"
 Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.ACTIVE_ONLY' "Coverage must support active-only display"
 Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.NONE' "Coverage must support hiding all zones"
 Assert-Contains $SharedMapLayer 'AppSettings\.ZONE_TRANSPARENCY' "Coverage must use shared transparency settings"
@@ -110,7 +110,7 @@ Assert-Contains $SharedMapLayer 'removeCameraListener' "Destroy must remove the 
 Assert-Contains $SharedMapLayer 'MapMarkerHitTest\.nearest' "Projected taps must use the shared hit test"
 
 Assert-Contains $Activity 'DrivingSnapshotIntent\.from\(intent\)' "Phone updates must use DrivingSnapshotIntent"
-Assert-Contains $Activity 'layer\.updateActiveCamera\(snapshot\.cameraId\)' "Phone map must receive the active camera"
+Assert-Contains $Activity 'layer\.updateActiveCameras\(snapshot\.activeCameraIds\)' "Phone map must receive all confirmed active cameras"
 Assert-Contains $Activity 'DrivingHudPresentation\.from' "Phone HUD must use shared presentation rules"
 Assert-Contains $Activity 'registerOnSharedPreferenceChangeListener' "Phone HUD must observe shared settings"
 Assert-Contains $Activity 'applyImmersiveMode\(\)' "Phone must retain immersive mode"
@@ -143,8 +143,8 @@ Assert-Contains $SurfaceController 'created\.restoreCameraState\(retainedCameraS
 
 Assert-Contains $CarPresentation 'SharedCameraMapLayer\(' "Car presentation must use the shared map layer"
 Assert-Contains $CarPresentation 'DrivingHudPresentation\.from' "Car HUD must use shared presentation rules"
-Assert-Contains $CarPresentation 'layer\.updateActiveCamera\(snapshot\.cameraId\)' "Car map must receive the active camera"
-Assert-Contains $CarPresentation 'databaseEmpty && !presentation\.hasActiveObject' "Car HUD must distinguish an empty database"
+Assert-Contains $CarPresentation 'layer\.updateActiveCameras\(snapshot\.activeCameraIds\)' "Car map must receive all confirmed active cameras"
+Assert-Contains $CarPresentation 'databaseEmpty && !presentation\.hasObject' "Car HUD must distinguish an empty database"
 Assert-Contains $CarPresentation 'registerOnSharedPreferenceChangeListener' "Car HUD must observe shared settings"
 Assert-Contains $CarPresentation 'mapWindow\.focusRect = null' "An empty visible area must clear the focus rect"
 
@@ -166,8 +166,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*45' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.10"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*46' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.11"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

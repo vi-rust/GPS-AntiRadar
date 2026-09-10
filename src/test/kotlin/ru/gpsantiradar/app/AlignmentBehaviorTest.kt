@@ -60,7 +60,7 @@ val presentation = CarMapPresentation(
 context, null, carContext(context))
 presentation.onDrivingSnapshot(DrivingSnapshot(
 70f, Float.NaN, 400, "Камера", 42L, 60, 800,
-55.0, 37.0, 0f, "", ""))
+55.0, 37.0, 0f, "", "", longArrayOf(42L)))
 
 presentation.onTrackingStopped()
 
@@ -132,7 +132,7 @@ register!!.setAccessible(true)
 register!!.invoke(presentation)
 presentation.onDrivingSnapshot(DrivingSnapshot(
 70f, Float.NaN, 400, "Камера", 42L, 60, 800,
-55.0, 37.0, 0f, "", ""))
+55.0, 37.0, 0f, "", "", longArrayOf(42L)))
 val speed = findText(presentation.rootView(), "70")
 assertEquals(DrivingHudPresentation.COLOR_OVERSPEED,
 speed!!.getCurrentTextColor())
@@ -160,6 +160,7 @@ receiver!!.onReceive(activity, Intent(TrackingService.ACTION_UPDATE)
 .putExtra(TrackingService.EXTRA_DISTANCE, 400)
 .putExtra(TrackingService.EXTRA_CAMERA, "Камера")
 .putExtra(TrackingService.EXTRA_CAMERA_ID, 42L)
+.putExtra(TrackingService.EXTRA_ACTIVE_CAMERA_IDS, longArrayOf(42L))
 .putExtra(TrackingService.EXTRA_LIMIT, 60)
 .putExtra(TrackingService.EXTRA_ALERT_DISTANCE, 800))
 val speed = findText(activity!!.findViewById(android.R.id.content), "70")

@@ -23,8 +23,8 @@ android {
         applicationId = "ru.gpsantiradar.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 45
-        versionName = "4.9.10"
+        versionCode = 46
+        versionName = "4.9.11"
         buildConfigField("String", "MAPKIT_API_KEY", "\"$mapkitApiKey\"")
     }
 

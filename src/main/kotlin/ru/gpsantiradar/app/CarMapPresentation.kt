@@ -158,7 +158,7 @@ class CarMapPresentation(
         }
         renderHud(snapshot)
         mapLayer?.let { layer ->
-            layer.updateActiveCamera(snapshot.cameraId)
+            layer.updateActiveCameras(snapshot.activeCameraIds)
             if (snapshot.hasLocation()) {
                 layer.updateCurrentLocation(
                     snapshot.latitude,
@@ -181,7 +181,7 @@ class CarMapPresentation(
         speedView.text = presentation.speedText
         speedView.setTextColor(presentation.speedColor)
         distanceView.text = presentation.distanceText
-        cameraView.text = if (databaseEmpty && !presentation.hasActiveObject) {
+        cameraView.text = if (databaseEmpty && !presentation.hasObject) {
             "База объектов пуста — обновите RadarBase"
         } else {
             presentation.cameraText
@@ -204,7 +204,7 @@ class CarMapPresentation(
         distanceView.text = "—"
         cameraView.text = "Антирадар остановлен"
         cameraView.setTextColor(GREEN)
-        mapLayer?.updateActiveCamera(-1L)
+        mapLayer?.updateActiveCameras(longArrayOf())
     }
 
     fun refreshVisible() {

@@ -211,29 +211,29 @@ System.out.println("ParserGeoTest: OK")
 
 private fun verifyMapVisualStyle() {
 val normal = MapVisualStyle.coverage(
--0x23c8d0, 2481003L, -1L)
+-0x23c8d0, 2481003L, emptySet())
 check(normal!!.fillColor == 0x26DC3730,
 "normal zone fill preserves its type color at 85 percent transparency")
 check(normal!!.strokeColor == 0x4DDC3730,
 "normal zone border preserves its type color at 70 percent transparency")
 
 val active = MapVisualStyle.coverage(
--0x23c8d0, 2481003L, 2481003L)
+-0x23c8d0, 2481003L, setOf(2481003L, 2481004L))
 check(active!!.fillColor == 0x4DDC3730,
 "active zone fill preserves its type color at 70 percent transparency")
 check(active!!.strokeColor == 0x73DC3730,
 "active zone border preserves its type color at 55 percent transparency")
 
 val other = MapVisualStyle.coverage(
--0x23c8d0, 2481004L, 2481003L)
-check(other!!.fillColor == normal!!.fillColor && other!!.strokeColor == normal!!.strokeColor,
-"only the currently controlled object receives active zone colors")
+-0x23c8d0, 2481004L, setOf(2481003L, 2481004L))
+check(other!!.fillColor == active!!.fillColor && other!!.strokeColor == active!!.strokeColor,
+"every confirmed active object receives active zone colors")
 val blue = MapVisualStyle.coverage(
--0xdc9024, 2481004L, 2481003L)
+-0xdc9024, 2481005L, setOf(2481003L, 2481004L))
 check(blue!!.fillColor == 0x26236FDC && blue!!.strokeColor == 0x4D236FDC,
 "each inactive zone keeps the original color of its object type")
 val configured = MapVisualStyle.coverage(
--0x23c8d0, 2481003L, 2481003L, 90, 10)
+-0x23c8d0, 2481003L, setOf(2481003L), 90, 10)
 check(configured!!.fillColor == 0xE6DC3730.toInt(),
 "active zone uses configured fill transparency")
 check(configured!!.strokeColor == 0xFFDC3730.toInt(),
@@ -348,7 +348,7 @@ check((idleHud!!.speedText.equals("0") && idleHud!!.distanceText.equals("—")
 
 val insideZone = DrivingSnapshot(64.6f, 3.5f, 250,
 "Камера", 42L, 80, 800, 56.84, 60.61, 123f,
-"inside", "diagnostic")
+"inside", "diagnostic", longArrayOf(42L))
 check((insideZone.hasLocation() && insideZone.hasObject()
 && insideZone.accuracyMeters == 3.5f
 && insideZone.cameraId == 42L
@@ -372,27 +372,34 @@ check((farHud!!.distanceText.equals("1.3 км") && farHud!!.speedColor == Drivin
 
 val unrestrictedHud = hud(DrivingSnapshot(
 120f, Float.NaN, 800, "Опасный участок", 44L, 0, 800,
-Double.NaN, Double.NaN, Float.NaN, "", ""), 10)
+Double.NaN, Double.NaN, Float.NaN, "", "", longArrayOf(44L)), 10)
 check(unrestrictedHud!!.speedColor == DrivingHudPresentation.COLOR_GREEN,
 "inside-zone HUD stays green without a speed limit")
 
 val atLimitHud = hud(DrivingSnapshot(
 80f, Float.NaN, 800, "Камера", 45L, 80, 800,
-Double.NaN, Double.NaN, Float.NaN, "", ""), 5)
+Double.NaN, Double.NaN, Float.NaN, "", "", longArrayOf(45L)), 5)
 check(atLimitHud!!.speedColor == DrivingHudPresentation.COLOR_ALERT,
 "inside-zone HUD turns yellow at the speed limit")
 
 val withinThresholdHud = hud(DrivingSnapshot(
 84.9f, Float.NaN, 800, "Камера", 46L, 80, 800,
-Double.NaN, Double.NaN, Float.NaN, "", ""), 5)
+Double.NaN, Double.NaN, Float.NaN, "", "", longArrayOf(46L)), 5)
 check(withinThresholdHud!!.speedColor == DrivingHudPresentation.COLOR_ALERT,
 "inside-zone HUD stays yellow below the configured threshold boundary")
 
 val atThresholdHud = hud(DrivingSnapshot(
 85f, Float.NaN, 800, "Камера", 47L, 80, 800,
-Double.NaN, Double.NaN, Float.NaN, "", ""), 5)
+Double.NaN, Double.NaN, Float.NaN, "", "", longArrayOf(47L)), 5)
 check(atThresholdHud!!.speedColor == DrivingHudPresentation.COLOR_OVERSPEED,
 "inside-zone HUD turns red at the configured threshold boundary")
+
+val unconfirmedHud = hud(DrivingSnapshot(
+90f, Float.NaN, 100, "Camera", 48L, 80, 800,
+Double.NaN, Double.NaN, Float.NaN, "", ""), 5)
+check(unconfirmedHud!!.hasObject && !unconfirmedHud!!.hasActiveObject &&
+unconfirmedHud!!.speedColor == DrivingHudPresentation.COLOR_GREEN,
+"an unconfirmed nearby object remains visible but cannot activate HUD colors")
 }
 
 private fun hud(snapshot:DrivingSnapshot, thresholdKmh:Int):DrivingHudPresentation {
@@ -491,6 +498,8 @@ observation(limited, 200, true, false)), 90f)
 var overspeed = tracker!!.snapshot().overspeedCandidate(90f)
 check(overspeed != null && overspeed!!.`object`.id == limited.id,
 "a farther limited object requests a beep when the nearest has no limit")
+check(tracker!!.snapshot().activeCameraIds.contentEquals(longArrayOf(noLimit.id, limited.id)),
+"all confirmed active object ids are exported in nearest-first order")
 
 val lowerId = marker(513, 55.752, 37.612, 1)
 lowerId.speedRules = SpeedControlRules.encode(50, false,
@@ -593,34 +602,35 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 14, "about dialog contains every known release")
-check((releases!!.get(0).version.equals("4.9.10")
-&& releases!!.get(1).version.equals("4.9.9")
-&& releases!!.get(2).version.equals("4.9.8")
-&& releases!!.get(3).version.equals("4.9.7")
-&& releases!!.get(4).version.equals("4.9.6")
-&& releases!!.get(5).version.equals("4.9.5")
-&& releases!!.get(6).version.equals("4.9.4")
-&& releases!!.get(7).version.equals("4.9.3")
-&& releases!!.get(8).version.equals("4.9.2")
-&& releases!!.get(9).version.equals("4.9.1")
-&& releases!!.get(10).version.equals("4.9.0")
-&& releases!!.get(11).version.equals("4.8.1")
-&& releases!!.get(12).version.equals("4.8.0")
-&& releases!!.get(13).version.equals("4.7.1")),
+check(releases!!.size == 15, "about dialog contains every known release")
+check((releases!!.get(0).version.equals("4.9.11")
+&& releases!!.get(1).version.equals("4.9.10")
+&& releases!!.get(2).version.equals("4.9.9")
+&& releases!!.get(3).version.equals("4.9.8")
+&& releases!!.get(4).version.equals("4.9.7")
+&& releases!!.get(5).version.equals("4.9.6")
+&& releases!!.get(6).version.equals("4.9.5")
+&& releases!!.get(7).version.equals("4.9.4")
+&& releases!!.get(8).version.equals("4.9.3")
+&& releases!!.get(9).version.equals("4.9.2")
+&& releases!!.get(10).version.equals("4.9.1")
+&& releases!!.get(11).version.equals("4.9.0")
+&& releases!!.get(12).version.equals("4.8.1")
+&& releases!!.get(13).version.equals("4.8.0")
+&& releases!!.get(14).version.equals("4.7.1")),
 "release history is newest first")
 for (release in releases!!)
 {
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.10")
+val current = ReleaseHistory.find("4.9.11")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("прозрачности")
+check((current!!.changes.contains("подтверждённого")
 && current!!.changes.contains("Android Auto")
-&& current!!.changes.contains("масштаб")),
-"current release describes zone and Android Auto changes")
+&& current!!.changes.contains("HUD")),
+"current release describes confirmed zones across both interfaces")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

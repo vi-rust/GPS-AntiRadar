@@ -347,6 +347,12 @@ class TrackingService : Service(), LocationListener {
             nearestDistance = tracked.distanceMeters.toDouble()
             nearestAlertDistance = tracked.activationDistance
         }
+        val closestActive = alertUpdate.closestActive
+        if (closestActive != null) {
+            nearest = closestActive.`object`
+            nearestDistance = closestActive.distanceMeters.toDouble()
+            nearestAlertDistance = closestActive.activationDistance
+        }
         var finishedObject: CameraPoint? = null
         for (exited in alertUpdate.exited) {
             if (exited.spoken) {
@@ -375,6 +381,7 @@ class TrackingService : Service(), LocationListener {
             nearestDistance,
             nearestAlertDistance,
             alertState,
+            alertUpdate.activeCameraIds,
         )
 
         val line = if (nearest == null) {
@@ -503,6 +510,7 @@ class TrackingService : Service(), LocationListener {
         nearestDistance: Double,
         alertDistance: Int,
         alertState: String,
+        activeCameraIds: LongArray,
     ) {
         val update = Intent(ACTION_UPDATE).setPackage(packageName)
         update.putExtra(EXTRA_SPEED, speedKmh)
@@ -519,6 +527,7 @@ class TrackingService : Service(), LocationListener {
         )
         update.putExtra(EXTRA_ALERT_DISTANCE, if (nearest == null) 0 else alertDistance)
         update.putExtra(EXTRA_ALERT_STATE, alertState)
+        update.putExtra(EXTRA_ACTIVE_CAMERA_IDS, activeCameraIds)
         val overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
             getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE).getInt(
                 AppSettings.OVERSPEED_THRESHOLD,
@@ -607,6 +616,7 @@ class TrackingService : Service(), LocationListener {
         const val EXTRA_DISTANCE = "distance"
         const val EXTRA_CAMERA = "camera"
         const val EXTRA_CAMERA_ID = "camera_id"
+        const val EXTRA_ACTIVE_CAMERA_IDS = "active_camera_ids"
         const val EXTRA_LIMIT = "limit"
         const val EXTRA_ALERT_DISTANCE = "alert_distance"
         const val EXTRA_ACCURACY = "accuracy"
