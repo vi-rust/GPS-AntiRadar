@@ -78,22 +78,22 @@ class CarMapPresentation(
         hudPanel.setPadding(dp(14), dp(10), dp(14), dp(12))
         hudPanel.elevation = dp(4).toFloat()
         val hudParams = FrameLayout.LayoutParams(
-            dp(300),
+            dp(225),
             FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM or Gravity.START,
-        ).apply { setMargins(dp(8), 0, 0, dp(8)) }
+            Gravity.TOP or Gravity.START,
+        ).apply { setMargins(dp(4), dp(4), 0, 0) }
         root.addView(hudPanel, hudParams)
 
-        hudPanel.addView(text("Скорость", 14, GREEN, Typeface.BOLD))
-        speedView = text("0", 46, GREEN, Typeface.BOLD).apply {
+        hudPanel.addView(text("Скорость", 20, GREEN, Typeface.BOLD))
+        speedView = text("0", 66, GREEN, Typeface.BOLD).apply {
             includeFontPadding = false
         }
         hudPanel.addView(speedView)
-        unitView = text("км/ч", 13, Color.DKGRAY, Typeface.NORMAL)
+        unitView = text("км/ч", 19, Color.DKGRAY, Typeface.NORMAL)
         hudPanel.addView(unitView)
-        distanceView = text("—", 24, Color.rgb(30, 30, 30), Typeface.BOLD)
+        distanceView = text("—", 35, Color.rgb(30, 30, 30), Typeface.BOLD)
         hudPanel.addView(distanceView)
-        cameraView = text("Объектов впереди нет", 13, GREEN, Typeface.BOLD)
+        cameraView = text("Объектов впереди нет", 19, GREEN, Typeface.BOLD)
         hudPanel.addView(cameraView)
 
         hintView = text("", 13, Color.BLACK, Typeface.BOLD).apply {
@@ -262,6 +262,10 @@ class CarMapPresentation(
         if (!destroyed) mapLayer?.refreshCoverageSettings()
     }
 
+    fun refreshLocationMarkerStyle() {
+        if (!destroyed) mapLayer?.refreshLocationMarkerStyle()
+    }
+
     fun cameraState(): CarMapCameraState? = if (destroyed) null else mapLayer?.cameraState()
 
     fun restoreCameraState(state: CarMapCameraState?) {
@@ -392,6 +396,7 @@ class CarMapPresentation(
             AppSettings.ACTIVE_ZONE_TRANSPARENCY,
             AppSettings.ZONE_DISPLAY_MODE,
             -> refreshCoverageSettings()
+            AppSettings.LOCATION_ARROW_SCALE -> refreshLocationMarkerStyle()
         }
     }
 
@@ -400,17 +405,18 @@ class CarMapPresentation(
         val params = hudPanel.layoutParams as FrameLayout.LayoutParams
         val area = stableArea
         if (area == null || area.isEmpty) {
-            params.leftMargin = dp(8)
-            params.bottomMargin = dp(8)
-            params.width = dp(300)
+            params.leftMargin = dp(4)
+            params.topMargin = dp(4)
+            params.bottomMargin = 0
+            params.width = dp(225)
             hudPanel.layoutParams = params
             return
         }
-        val surfaceHeight = mapView?.mapWindow?.height() ?: root.height
-        params.leftMargin = max(dp(8), area.left + dp(8))
-        params.bottomMargin = max(dp(8), surfaceHeight - area.bottom + dp(8))
-        val availableWidth = max(dp(180), area.width() - dp(16))
-        params.width = min(dp(300), availableWidth)
+        params.leftMargin = dp(4)
+        params.topMargin = dp(4)
+        params.bottomMargin = 0
+        val availableWidth = max(dp(135), area.width() - dp(8))
+        params.width = min(dp(225), availableWidth)
         hudPanel.layoutParams = params
     }
 

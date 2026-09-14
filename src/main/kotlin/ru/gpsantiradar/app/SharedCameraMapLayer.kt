@@ -236,6 +236,13 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (!destroyed) rebuildCameraCoverage()
     }
 
+    fun refreshLocationMarkerStyle() {
+        val placemark = locationPlacemark
+        if (!destroyed && placemark != null && placemark.isValid) {
+            placemark.setIconStyle(locationMarkerStyle())
+        }
+    }
+
     fun cameraState(): CarMapCameraState? {
         val activeMap = map
         if (destroyed || activeMap == null) return null
@@ -769,8 +776,19 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         .setAnchor(android.graphics.PointF(0.5f, 0.5f))
         .setRotationType(RotationType.ROTATE)
         .setFlat(true)
-        .setScale(0.8f)
+        .setScale(locationArrowScale())
         .setZIndex(100f)
+
+    private fun locationArrowScale(): Float {
+        val stored = resourceContext?.getSharedPreferences(
+            AppSettings.PREFERENCES,
+            Context.MODE_PRIVATE,
+        )?.getInt(
+            AppSettings.LOCATION_ARROW_SCALE,
+            AppSettings.DEFAULT_LOCATION_ARROW_SCALE_TENTHS,
+        ) ?: AppSettings.DEFAULT_LOCATION_ARROW_SCALE_TENTHS
+        return AppSettings.locationArrowScale(stored)
+    }
 
     private fun centerOnLocationFromGps(speedKmh: Float) {
         val activeMap = map

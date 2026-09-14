@@ -33,6 +33,14 @@ class CarValueScreen internal constructor(
             AppSettings.MAX_OVERSPEED_THRESHOLD_KMH,
             AppSettings.OVERSPEED_THRESHOLD_STEP_KMH,
         ),
+        LOCATION_ARROW_SCALE(
+            AppSettings.LOCATION_ARROW_SCALE,
+            "Размер стрелки",
+            AppSettings.DEFAULT_LOCATION_ARROW_SCALE_TENTHS,
+            AppSettings.MIN_LOCATION_ARROW_SCALE_TENTHS,
+            AppSettings.MAX_LOCATION_ARROW_SCALE_TENTHS,
+            AppSettings.LOCATION_ARROW_SCALE_STEP_TENTHS,
+        ),
         HUD_TRANSPARENCY(
             AppSettings.HUD_TRANSPARENCY,
             "Прозрачность HUD",
@@ -67,12 +75,14 @@ class CarValueScreen internal constructor(
 
         fun normalize(value: Int): Int = when (this) {
             OVERSPEED_THRESHOLD -> AppSettings.clampOverspeedThreshold(value)
+            LOCATION_ARROW_SCALE -> AppSettings.clampLocationArrowScale(value)
             HUD_TRANSPARENCY -> AppSettings.clampHudTransparency(value)
             ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY -> AppSettings.clampZoneTransparency(value)
         }
 
         fun adjust(value: Int, direction: Int): Int = when (this) {
             OVERSPEED_THRESHOLD -> AppSettings.adjustOverspeedThreshold(value, direction)
+            LOCATION_ARROW_SCALE -> AppSettings.adjustLocationArrowScale(value, direction)
             HUD_TRANSPARENCY -> AppSettings.adjustHudTransparency(value, direction)
             ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY ->
                 AppSettings.adjustZoneTransparency(value, direction)
@@ -80,6 +90,11 @@ class CarValueScreen internal constructor(
 
         fun format(value: Int): String = when (this) {
             OVERSPEED_THRESHOLD -> "${normalize(value)} км/ч"
+            LOCATION_ARROW_SCALE -> String.format(
+                java.util.Locale.forLanguageTag("ru-RU"),
+                "%.1f",
+                AppSettings.locationArrowScale(normalize(value)),
+            )
             HUD_TRANSPARENCY, ZONE_TRANSPARENCY, ACTIVE_ZONE_TRANSPARENCY -> "${normalize(value)}%"
         }
     }
@@ -151,6 +166,9 @@ class CarValueScreen internal constructor(
             surfaceController == null -> NO_OP
             setting == Setting.HUD_TRANSPARENCY -> Runnable {
                 surfaceController.refreshHudTransparency()
+            }
+            setting == Setting.LOCATION_ARROW_SCALE -> Runnable {
+                surfaceController.refreshLocationMarkerStyle()
             }
             setting == Setting.ZONE_TRANSPARENCY ||
                 setting == Setting.ACTIVE_ZONE_TRANSPARENCY -> Runnable {

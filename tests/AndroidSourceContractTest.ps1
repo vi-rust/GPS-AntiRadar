@@ -102,6 +102,8 @@ Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.NONE' "Coverage must support h
 Assert-Contains $SharedMapLayer 'AppSettings\.ZONE_TRANSPARENCY' "Coverage must use shared transparency settings"
 Assert-Contains $SharedMapLayer 'MapVisualStyle\.locationPrimaryColor\(nightMode\)' "Location arrow must follow the map theme"
 Assert-Contains $SharedMapLayer 'AppSettings\.AUTO_ROTATE_MAP' "Map rotation must use the shared setting"
+Assert-Contains $SharedMapLayer 'AppSettings\.LOCATION_ARROW_SCALE' "Location arrow must use the shared scale setting"
+Assert-Contains $SharedMapLayer 'setScale\(locationArrowScale\(\)\)' "Location arrow scale must be applied to its icon style"
 Assert-Contains $SharedMapLayer 'fun cameraState\(\): CarMapCameraState\?' "Shared map must expose restorable camera state"
 Assert-Contains $SharedMapLayer 'initialLoadGeneration\+\+' "Restoring a camera must cancel stale initial positioning"
 Assert-Contains $SharedMapLayer 'individualMarkerStyle\(\): IconStyle = IconStyle\(\)[\s\S]*?setRotationType\(RotationType\.NO_ROTATION\)[\s\S]*?setFlat\(false\)' "Object icons must stay upright when the map rotates"
@@ -117,6 +119,11 @@ Assert-Contains $Activity 'applyImmersiveMode\(\)' "Phone must retain immersive 
 Assert-Contains $Activity 'radarBaseUpdater\(\)\.requestUpdate\(\)' "Phone update action must use the application updater"
 Assert-Contains $Activity 'AppSettings\.ZONE_TRANSPARENCY' "Phone menu must expose zone transparency"
 Assert-Contains $Activity 'AppSettings\.ZONE_DISPLAY_MODE' "Phone menu must expose zone visibility"
+Assert-Contains $Activity 'showMenuDialog\(' "Phone settings must be split into thematic submenus"
+Assert-Contains $Activity 'AppSettings\.LOCATION_ARROW_SCALE' "Phone menu must expose location arrow scale"
+Assert-Contains $Activity 'Gravity\.TOP or Gravity\.START' "Phone HUD must be placed in the top-left corner"
+Assert-Contains $Activity 'FrameLayout\.LayoutParams\(dp\(203\)' "Phone HUD width must be reduced by one quarter"
+Assert-Contains $Activity 'setPadding\(dp\(4\), dp\(4\), 0, 0\)' "Phone HUD must use a minimal non-zero inset"
 
 Assert-Contains $Application 'RadarBaseUpdateSingleFlight\(' "Application must own the process update guard"
 Assert-Contains $Application 'radarBaseUpdater\.requestUpdate\(\)' "Application must request the cold-start update"
@@ -147,11 +154,16 @@ Assert-Contains $CarPresentation 'layer\.updateActiveCameras\(snapshot\.activeCa
 Assert-Contains $CarPresentation 'databaseEmpty && !presentation\.hasObject' "Car HUD must distinguish an empty database"
 Assert-Contains $CarPresentation 'registerOnSharedPreferenceChangeListener' "Car HUD must observe shared settings"
 Assert-Contains $CarPresentation 'mapWindow\.focusRect = null' "An empty visible area must clear the focus rect"
+Assert-Contains $CarPresentation 'Gravity\.TOP or Gravity\.START' "Car HUD must be placed in the top-left corner"
+Assert-Contains $CarPresentation 'dp\(225\)' "Car HUD width must be reduced by one quarter"
+Assert-Contains $CarPresentation 'setMargins\(dp\(4\), dp\(4\), 0, 0\)' "Car HUD must use the same minimal inset as the phone"
 
 Assert-Contains $CarGestures 'ln\(scaleFactor\.toDouble\(\)\) / ln\(2\.0\)' "Car pinch must use logarithmic zoom"
 Assert-Contains $CarGestures 'target\.tapCameraAt\(x, y\)' "Camera taps must be consumed before background taps"
 Assert-Contains $CarMenu 'TrackingService\.requestStop\(carContext\)' "Car exit must stop the shared tracker"
+Assert-Contains $CarMenu 'CarMenuGroup\.entries' "Car settings must be split into thematic submenus"
 Assert-Contains $CarValue 'AppSettings\.adjustOverspeedThreshold' "Car settings must reuse shared overspeed rules"
+Assert-Contains $CarValue 'AppSettings\.adjustLocationArrowScale' "Car settings must reuse shared arrow scale rules"
 Assert-Contains $CarValue 'AppSettings\.adjustHudTransparency' "Car settings must reuse shared transparency rules"
 Assert-Contains $CarValue 'AppSettings\.adjustZoneTransparency' "Car settings must reuse shared zone transparency rules"
 Assert-Contains $CarValue '\.commit\(\)' "Car numeric settings must be synchronous"
@@ -166,8 +178,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*46' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.11"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*47' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.12"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

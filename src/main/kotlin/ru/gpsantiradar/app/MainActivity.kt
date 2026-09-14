@@ -91,6 +91,7 @@ class MainActivity : Activity() {
             AppSettings.ACTIVE_ZONE_TRANSPARENCY,
             AppSettings.ZONE_DISPLAY_MODE,
             -> cameraMapLayer?.refreshCoverageSettings()
+            AppSettings.LOCATION_ARROW_SCALE -> cameraMapLayer?.refreshLocationMarkerStyle()
         }
     }
 
@@ -338,7 +339,28 @@ class MainActivity : Activity() {
                 windowInsets
             }
         }
-        screen.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        val hudOverlay = FrameLayout(this).apply {
+            setPadding(dp(4), dp(4), 0, 0)
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            hudOverlay.setOnApplyWindowInsetsListener { view, windowInsets ->
+                val cutout = windowInsets.getInsets(WindowInsets.Type.displayCutout())
+                view.setPadding(dp(4) + cutout.left, dp(4) + cutout.top, 0, 0)
+                windowInsets
+            }
+        } else if (Build.VERSION.SDK_INT >= 28) {
+            hudOverlay.setOnApplyWindowInsetsListener { view, windowInsets ->
+                val cutout = windowInsets.displayCutout
+                view.setPadding(
+                    dp(4) + (cutout?.safeInsetLeft ?: 0),
+                    dp(4) + (cutout?.safeInsetTop ?: 0),
+                    0,
+                    0,
+                )
+                windowInsets
+            }
+        }
+        screen.addView(hudOverlay, FrameLayout.LayoutParams(-1, -1))
 
         hudPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -352,21 +374,22 @@ class MainActivity : Activity() {
             ),
         )
         hudPanel.elevation = dp(4).toFloat()
-        val hudParams = FrameLayout.LayoutParams(dp(270), -2, Gravity.BOTTOM or Gravity.START)
-            .apply { setMargins(dp(4), 0, 0, dp(4)) }
-        overlay.addView(hudPanel, hudParams)
+        val hudParams = FrameLayout.LayoutParams(dp(203), -2, Gravity.TOP or Gravity.START)
+        hudOverlay.addView(hudPanel, hudParams)
 
-        hudPanel.addView(text("Скорость", 14, GREEN, Typeface.BOLD))
-        speedView = text("0", 46, GREEN, Typeface.BOLD).apply { includeFontPadding = false }
+        hudPanel.addView(text("Скорость", 20, GREEN, Typeface.BOLD))
+        speedView = text("0", 66, GREEN, Typeface.BOLD).apply { includeFontPadding = false }
         hudPanel.addView(speedView)
-        unitView = text("км/ч", 13, secondaryTextColor(), Typeface.NORMAL)
+        unitView = text("км/ч", 19, secondaryTextColor(), Typeface.NORMAL)
         hudPanel.addView(unitView)
-        distanceView = text("—", 24, primaryTextColor(), Typeface.BOLD)
+        distanceView = text("—", 35, primaryTextColor(), Typeface.BOLD)
         hudPanel.addView(distanceView)
-        cameraView = text("Объектов впереди нет", 13, GREEN, Typeface.BOLD).apply {
+        cameraView = text("Объектов впереди нет", 19, GREEN, Typeface.BOLD).apply {
             gravity = Gravity.START
         }
         hudPanel.addView(cameraView)
+
+        screen.addView(overlay, FrameLayout.LayoutParams(-1, -1))
 
         menuButtonView = iconButton(R.drawable.ic_menu, "Меню").apply {
             setOnClickListener { showAppMenu() }
@@ -420,104 +443,41 @@ class MainActivity : Activity() {
     }
 
     private fun showAppMenu() {
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(6), dp(8), dp(4))
+        val content = menuContent()
+        val alerts = menuAction(R.drawable.ic_speed_limit, "Оповещения")
+        val map = menuAction(R.drawable.ic_navigation, "Карта")
+        val interfaceSettings = menuAction(R.drawable.ic_theme, "Интерфейс")
+        val applicationSettings = menuAction(R.drawable.ic_info, "Приложение")
+        val exit = menuAction(R.drawable.ic_exit, "Выйти")
+        listOf(alerts, map, interfaceSettings, applicationSettings, exit).forEach {
+            content.addView(it, LinearLayout.LayoutParams(-1, dp(54)))
         }
+        val dialog = showMenuDialog("Меню", content)
+        alerts.setOnClickListener { dialog.dismiss(); showAlertsMenu() }
+        map.setOnClickListener { dialog.dismiss(); showMapMenu() }
+        interfaceSettings.setOnClickListener { dialog.dismiss(); showInterfaceMenu() }
+        applicationSettings.setOnClickListener { dialog.dismiss(); showApplicationMenu() }
+        exit.setOnClickListener { dialog.dismiss(); exitApplication() }
+    }
 
-        val update = menuAction(R.drawable.ic_refresh, "Обновить базу объектов")
-        content.addView(update, LinearLayout.LayoutParams(-1, dp(54)))
+    private fun showAlertsMenu() {
+        val content = menuContent()
+        content.addView(overspeedThresholdRow(), LinearLayout.LayoutParams(-1, dp(86)))
+        showMenuDialog("Оповещения", content, backToRoot = true)
+    }
 
-        val overspeedRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-        }
-        val overspeedIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_speed_limit)
-            tintIcon(this)
-        }
-        overspeedRow.addView(overspeedIcon, LinearLayout.LayoutParams(dp(28), dp(28)))
-        val overspeedContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val overspeedContentParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
-            setMargins(dp(14), 0, 0, 0)
-        }
-        overspeedRow.addView(overspeedContent, overspeedContentParams)
-        val overspeedLabel = text("", 15, primaryTextColor(), Typeface.NORMAL)
-        overspeedContent.addView(overspeedLabel)
-        val overspeedThreshold = SeekBar(this)
-        overspeedThreshold.max = AppSettings.MAX_OVERSPEED_THRESHOLD_KMH
-        val savedOverspeedThreshold = AppSettings.clampOverspeedThreshold(
-            getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
-                AppSettings.OVERSPEED_THRESHOLD,
-                AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH,
-            ),
+    private fun showMapMenu() {
+        val content = menuContent()
+        content.addView(locationArrowScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
+        content.addView(autoRotateRow(), LinearLayout.LayoutParams(-1, dp(54)))
+        val zoneDisplayMode = ZoneDisplayMode.fromStored(
+            settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
         )
-        overspeedThreshold.progress = savedOverspeedThreshold
-        overspeedLabel.text = "Предел превышения скорости: $savedOverspeedThreshold км/ч"
-        overspeedThreshold.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                val value = AppSettings.clampOverspeedThreshold(progress)
-                overspeedLabel.text = "Предел превышения скорости: $value км/ч"
-                if (fromUser) {
-                    getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .putInt(AppSettings.OVERSPEED_THRESHOLD, value).apply()
-                }
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar) {}
-        })
-        overspeedContent.addView(overspeedThreshold, LinearLayout.LayoutParams(-1, dp(42)))
-        content.addView(overspeedRow, LinearLayout.LayoutParams(-1, dp(86)))
-
-        val transparencyRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-        }
-        val transparencyIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_opacity)
-            tintIcon(this)
-        }
-        transparencyRow.addView(transparencyIcon, LinearLayout.LayoutParams(dp(28), dp(28)))
-        val transparencyContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val transparencyContentParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
-            setMargins(dp(14), 0, 0, 0)
-        }
-        transparencyRow.addView(transparencyContent, transparencyContentParams)
-        val transparencyLabel = text("", 15, primaryTextColor(), Typeface.NORMAL)
-        transparencyContent.addView(transparencyLabel)
-        val transparency = SeekBar(this)
-        transparency.max = (AppSettings.MAX_HUD_TRANSPARENCY_PERCENT -
-            AppSettings.MIN_HUD_TRANSPARENCY_PERCENT) / AppSettings.HUD_TRANSPARENCY_STEP_PERCENT
-        val savedTransparency = AppSettings.clampHudTransparency(
-            getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(
-                AppSettings.HUD_TRANSPARENCY,
-                AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT,
-            ),
+        val zoneDisplay = menuAction(
+            R.drawable.ic_zones,
+            "Отображение зон: ${zoneDisplayMode.title()}",
         )
-        transparency.progress = (savedTransparency - AppSettings.MIN_HUD_TRANSPARENCY_PERCENT) /
-            AppSettings.HUD_TRANSPARENCY_STEP_PERCENT
-        transparencyLabel.text = "Прозрачность HUD: $savedTransparency%"
-        transparency.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                val value = AppSettings.clampHudTransparency(
-                    AppSettings.MIN_HUD_TRANSPARENCY_PERCENT +
-                        progress * AppSettings.HUD_TRANSPARENCY_STEP_PERCENT,
-                )
-                transparencyLabel.text = "Прозрачность HUD: $value%"
-                getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                    .putInt(AppSettings.HUD_TRANSPARENCY, value).apply()
-                applyHudTransparency(value)
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar) {}
-        })
-        transparencyContent.addView(transparency, LinearLayout.LayoutParams(-1, dp(42)))
-        content.addView(transparencyRow, LinearLayout.LayoutParams(-1, dp(86)))
-
+        content.addView(zoneDisplay, LinearLayout.LayoutParams(-1, dp(54)))
         content.addView(
             zoneTransparencyRow(
                 "Прозрачность зон",
@@ -534,88 +494,217 @@ class MainActivity : Activity() {
             ),
             LinearLayout.LayoutParams(-1, dp(86)),
         )
-        val zoneDisplayMode = ZoneDisplayMode.fromStored(
-            settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
-        )
-        val zoneDisplay = menuAction(
-            R.drawable.ic_zones,
-            "Отображение зон: ${zoneDisplayMode.title()}",
-        )
-        content.addView(zoneDisplay, LinearLayout.LayoutParams(-1, dp(54)))
+        val dialog = showMenuDialog("Карта", content, backToRoot = true)
+        zoneDisplay.setOnClickListener { dialog.dismiss(); showZoneDisplayDialog() }
+    }
 
-        val autoRotateRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(4), dp(12), dp(4))
-        }
-        val autoRotateIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_navigation)
-            tintIcon(this)
-        }
-        autoRotateRow.addView(autoRotateIcon, LinearLayout.LayoutParams(dp(28), dp(28)))
-        val autoRotate = Switch(this).apply {
-            text = "Автоповорот карты"
-            textSize = 15f
-            setTextColor(primaryTextColor())
-            isChecked = getSharedPreferences(SETTINGS, MODE_PRIVATE).getBoolean(
-                AppSettings.AUTO_ROTATE_MAP,
-                AppSettings.DEFAULT_AUTO_ROTATE_MAP,
-            )
-            setOnCheckedChangeListener { _, enabled ->
-                getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                    .putBoolean(AppSettings.AUTO_ROTATE_MAP, enabled).apply()
-            }
-        }
-        val autoRotateParams = LinearLayout.LayoutParams(0, -1, 1f).apply {
-            setMargins(dp(14), 0, 0, 0)
-        }
-        autoRotateRow.addView(autoRotate, autoRotateParams)
-        content.addView(autoRotateRow, LinearLayout.LayoutParams(-1, dp(54)))
-
+    private fun showInterfaceMenu() {
+        val content = menuContent()
+        content.addView(hudTransparencyRow(), LinearLayout.LayoutParams(-1, dp(86)))
         val theme = menuAction(R.drawable.ic_theme, "Тема: ${ThemeSettings.mode(this).title()}")
         content.addView(theme, LinearLayout.LayoutParams(-1, dp(54)))
-        val mapKey = menuAction(R.drawable.ic_key, "Ключ MapKit")
-        content.addView(mapKey, LinearLayout.LayoutParams(-1, dp(54)))
-        val about = menuAction(R.drawable.ic_info, "О программе")
-        content.addView(about, LinearLayout.LayoutParams(-1, dp(54)))
-        val exit = menuAction(R.drawable.ic_exit, "Выйти")
-        content.addView(exit, LinearLayout.LayoutParams(-1, dp(54)))
+        val dialog = showMenuDialog("Интерфейс", content, backToRoot = true)
+        theme.setOnClickListener { dialog.dismiss(); showThemeDialog() }
+    }
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(content, FrameLayout.LayoutParams(-1, -2))
+    private fun showApplicationMenu() {
+        val content = menuContent()
+        val update = menuAction(R.drawable.ic_refresh, "Обновить базу объектов")
+        val mapKey = menuAction(R.drawable.ic_key, "Ключ MapKit")
+        val about = menuAction(R.drawable.ic_info, "О программе")
+        listOf(update, mapKey, about).forEach {
+            content.addView(it, LinearLayout.LayoutParams(-1, dp(54)))
         }
-        val dialog = AlertDialog.Builder(this, dialogTheme())
-            .setView(scroll)
-            .setNegativeButton("Закрыть", null)
-            .create()
+        val dialog = showMenuDialog("Приложение", content, backToRoot = true)
         update.setOnClickListener {
             dialog.dismiss()
             (application as GpsAntiRadarApplication).radarBaseUpdater().requestUpdate()
         }
-        mapKey.setOnClickListener {
-            dialog.dismiss()
-            showMapKeyDialog()
-        }
-        theme.setOnClickListener {
-            dialog.dismiss()
-            showThemeDialog()
-        }
-        zoneDisplay.setOnClickListener {
-            dialog.dismiss()
-            showZoneDisplayDialog()
-        }
-        about.setOnClickListener {
-            dialog.dismiss()
-            showAboutDialog()
-        }
-        exit.setOnClickListener {
-            dialog.dismiss()
-            exitApplication()
-        }
-        dialog.show()
-        styleRoundedDialog(dialog)
+        mapKey.setOnClickListener { dialog.dismiss(); showMapKeyDialog() }
+        about.setOnClickListener { dialog.dismiss(); showAboutDialog() }
     }
+
+    private fun menuContent(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(8), dp(6), dp(8), dp(4))
+    }
+
+    private fun showMenuDialog(
+        title: String,
+        content: LinearLayout,
+        backToRoot: Boolean = false,
+    ): AlertDialog {
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(content, FrameLayout.LayoutParams(-1, -2))
+        }
+        return AlertDialog.Builder(this, dialogTheme())
+            .setTitle(title)
+            .setView(scroll)
+            .setNegativeButton(if (backToRoot) "Назад" else "Закрыть") { _, _ ->
+                if (backToRoot) showAppMenu()
+            }
+            .create()
+            .also { dialog ->
+                dialog.show()
+                styleRoundedDialog(dialog)
+            }
+    }
+
+    private fun overspeedThresholdRow(): LinearLayout {
+        val row = valueRow(R.drawable.ic_speed_limit)
+        val controls = row.getChildAt(1) as LinearLayout
+        val label = text("", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(label)
+        val seekBar = SeekBar(this).apply { max = AppSettings.MAX_OVERSPEED_THRESHOLD_KMH }
+        val saved = AppSettings.clampOverspeedThreshold(
+            settingsPreferences.getInt(
+                AppSettings.OVERSPEED_THRESHOLD,
+                AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH,
+            ),
+        )
+        seekBar.progress = saved
+        label.text = "Предел превышения скорости: $saved км/ч"
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.clampOverspeedThreshold(progress)
+                label.text = "Предел превышения скорости: $value км/ч"
+                if (fromUser) settingsPreferences.edit()
+                    .putInt(AppSettings.OVERSPEED_THRESHOLD, value).apply()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
+    }
+
+    private fun locationArrowScaleRow(): LinearLayout {
+        val row = valueRow(R.drawable.ic_navigation)
+        val controls = row.getChildAt(1) as LinearLayout
+        val label = text("", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(label)
+        val seekBar = SeekBar(this).apply {
+            max = (AppSettings.MAX_LOCATION_ARROW_SCALE_TENTHS -
+                AppSettings.MIN_LOCATION_ARROW_SCALE_TENTHS) /
+                AppSettings.LOCATION_ARROW_SCALE_STEP_TENTHS
+        }
+        val saved = AppSettings.clampLocationArrowScale(
+            settingsPreferences.getInt(
+                AppSettings.LOCATION_ARROW_SCALE,
+                AppSettings.DEFAULT_LOCATION_ARROW_SCALE_TENTHS,
+            ),
+        )
+        seekBar.progress = (saved - AppSettings.MIN_LOCATION_ARROW_SCALE_TENTHS) /
+            AppSettings.LOCATION_ARROW_SCALE_STEP_TENTHS
+        label.text = "Размер стрелки: ${formatArrowScale(saved)}"
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.clampLocationArrowScale(
+                    AppSettings.MIN_LOCATION_ARROW_SCALE_TENTHS +
+                        progress * AppSettings.LOCATION_ARROW_SCALE_STEP_TENTHS,
+                )
+                label.text = "Размер стрелки: ${formatArrowScale(value)}"
+                if (fromUser) settingsPreferences.edit()
+                    .putInt(AppSettings.LOCATION_ARROW_SCALE, value).apply()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
+    }
+
+    private fun hudTransparencyRow(): LinearLayout {
+        val row = valueRow(R.drawable.ic_opacity)
+        val controls = row.getChildAt(1) as LinearLayout
+        val label = text("", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(label)
+        val seekBar = SeekBar(this).apply {
+            max = (AppSettings.MAX_HUD_TRANSPARENCY_PERCENT -
+                AppSettings.MIN_HUD_TRANSPARENCY_PERCENT) / AppSettings.HUD_TRANSPARENCY_STEP_PERCENT
+        }
+        val saved = AppSettings.clampHudTransparency(
+            settingsPreferences.getInt(
+                AppSettings.HUD_TRANSPARENCY,
+                AppSettings.DEFAULT_HUD_TRANSPARENCY_PERCENT,
+            ),
+        )
+        seekBar.progress = (saved - AppSettings.MIN_HUD_TRANSPARENCY_PERCENT) /
+            AppSettings.HUD_TRANSPARENCY_STEP_PERCENT
+        label.text = "Прозрачность HUD: $saved%"
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.clampHudTransparency(
+                    AppSettings.MIN_HUD_TRANSPARENCY_PERCENT +
+                        progress * AppSettings.HUD_TRANSPARENCY_STEP_PERCENT,
+                )
+                label.text = "Прозрачность HUD: $value%"
+                settingsPreferences.edit().putInt(AppSettings.HUD_TRANSPARENCY, value).apply()
+                applyHudTransparency(value)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
+    }
+
+    private fun autoRotateRow(): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_navigation)
+            tintIcon(this)
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val toggle = Switch(this).apply {
+            text = "Автоповорот карты"
+            textSize = 15f
+            setTextColor(primaryTextColor())
+            isChecked = settingsPreferences.getBoolean(
+                AppSettings.AUTO_ROTATE_MAP,
+                AppSettings.DEFAULT_AUTO_ROTATE_MAP,
+            )
+            setOnCheckedChangeListener { _, enabled ->
+                settingsPreferences.edit().putBoolean(AppSettings.AUTO_ROTATE_MAP, enabled).apply()
+            }
+        }
+        row.addView(toggle, LinearLayout.LayoutParams(0, -1, 1f).apply {
+            setMargins(dp(14), 0, 0, 0)
+        })
+        return row
+    }
+
+    private fun valueRow(iconResource: Int): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(iconResource)
+            tintIcon(this)
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
+        row.addView(
+            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(14), 0, 0, 0) },
+        )
+        return row
+    }
+
+    private fun formatArrowScale(value: Int): String = String.format(
+        java.util.Locale.forLanguageTag("ru-RU"),
+        "%.1f",
+        AppSettings.locationArrowScale(value),
+    )
 
     private fun zoneTransparencyRow(
         label: String,

@@ -17,6 +17,7 @@ object AppSettings {
     const val ACTIVE_ZONE_TRANSPARENCY = "active_zone_transparency"
     const val ZONE_DISPLAY_MODE = "zone_display_mode"
     const val AUTO_ROTATE_MAP = "auto_rotate_map"
+    const val LOCATION_ARROW_SCALE = "location_arrow_scale_tenths"
     const val THEME_MODE = "theme_mode"
     const val THEME_LATITUDE = "theme_latitude"
     const val THEME_LONGITUDE = "theme_longitude"
@@ -28,6 +29,10 @@ object AppSettings {
     const val OVERSPEED_THRESHOLD_STEP_KMH = 1
     const val DEFAULT_HUD_TRANSPARENCY_PERCENT = 10
     const val DEFAULT_AUTO_ROTATE_MAP = false
+    const val DEFAULT_LOCATION_ARROW_SCALE_TENTHS = 10
+    const val MIN_LOCATION_ARROW_SCALE_TENTHS = 10
+    const val MAX_LOCATION_ARROW_SCALE_TENTHS = 20
+    const val LOCATION_ARROW_SCALE_STEP_TENTHS = 1
     const val MIN_HUD_TRANSPARENCY_PERCENT = 0
     const val MAX_HUD_TRANSPARENCY_PERCENT = 80
     const val HUD_TRANSPARENCY_STEP_PERCENT = 5
@@ -59,6 +64,16 @@ object AppSettings {
 
     fun adjustZoneTransparency(value: Int, direction: Int): Int =
         clampZoneTransparency(clampZoneTransparency(value) + direction.sign * ZONE_TRANSPARENCY_STEP_PERCENT)
+
+    fun clampLocationArrowScale(value: Int): Int =
+        max(MIN_LOCATION_ARROW_SCALE_TENTHS, min(MAX_LOCATION_ARROW_SCALE_TENTHS, value))
+
+    fun adjustLocationArrowScale(value: Int, direction: Int): Int =
+        clampLocationArrowScale(
+            clampLocationArrowScale(value) + direction.sign * LOCATION_ARROW_SCALE_STEP_TENTHS,
+        )
+
+    fun locationArrowScale(value: Int): Float = clampLocationArrowScale(value) / 10f
 
     private fun floorToStep(value: Int, minValue: Int, maxValue: Int, step: Int): Int {
         val clamped = max(minValue, min(maxValue, value))

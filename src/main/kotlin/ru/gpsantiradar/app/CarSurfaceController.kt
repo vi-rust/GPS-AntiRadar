@@ -37,6 +37,7 @@ class CarSurfaceController internal constructor(
         fun cameraState(): CarMapCameraState? = null
         fun restoreCameraState(state: CarMapCameraState?) {}
         fun refreshCoverageSettings() {}
+        fun refreshLocationMarkerStyle() {}
         fun refreshVisible()
         fun zoomBy(delta: Float)
         fun recenter()
@@ -268,6 +269,11 @@ class CarSurfaceController internal constructor(
     }
 
     @Synchronized
+    fun refreshLocationMarkerStyle() {
+        if (!destroyed) surfaceResource?.refreshLocationMarkerStyle()
+    }
+
+    @Synchronized
     fun destroy() {
         if (destroyed) return
         destroyed = true
@@ -389,6 +395,9 @@ class CarSurfaceController internal constructor(
         }
         override fun refreshCoverageSettings() {
             if (!released) content?.refreshCoverageSettings()
+        }
+        override fun refreshLocationMarkerStyle() {
+            if (!released) content?.refreshLocationMarkerStyle()
         }
         override fun zoomBy(delta: Float) {
             if (!released) content?.zoomBy(delta)

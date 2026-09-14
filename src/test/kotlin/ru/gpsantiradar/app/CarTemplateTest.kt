@@ -15,6 +15,8 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.Surface
@@ -59,12 +61,12 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.11", BuildConfig.VERSION_NAME)
+assertEquals("4.9.12", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("подтверждённого"))
-assertTrue(release!!.changes.contains("Android Auto"))
-assertTrue(release!!.changes.contains("HUD"))
+assertTrue(release!!.changes.contains("Плашка скорости"))
+assertTrue(release!!.changes.contains("размера стрелки"))
+assertTrue(release!!.changes.contains("меню"))
 }
 
 @Test @Throws(Exception::class)
@@ -193,15 +195,69 @@ val root = (activity!!.findViewById(android.R.id.content) as ViewGroup).getChild
 val menu = findByDescription(root!!, "Меню")
 assertTrue(menu != null)
 menu!!.performClick()
-val dialog = ShadowAlertDialog.getLatestAlertDialog()
+var dialog = ShadowAlertDialog.getLatestAlertDialog()
 assertTrue(dialog != null && dialog!!.isShowing())
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Оповещения") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Карта") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Интерфейс") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Приложение") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Выйти") != null)
+val interfaceTitle = findText(dialog!!.getWindow()!!.getDecorView(), "Интерфейс")
+(interfaceTitle!!.getParent() as View).performClick()
+dialog = ShadowAlertDialog.getLatestAlertDialog()
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Тема: Тёмная") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность HUD: 10%") != null)
+dialog!!.dismiss()
+
+menu!!.performClick()
+dialog = ShadowAlertDialog.getLatestAlertDialog()
+val mapTitle = findText(dialog!!.getWindow()!!.getDecorView(), "Карта")
+(mapTitle!!.getParent() as View).performClick()
+dialog = ShadowAlertDialog.getLatestAlertDialog()
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Размер стрелки: 1,0") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность зон: 85%") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность активной зоны: 70%") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Отображение зон: Все") != null)
 assertNull(findTextStartingWith(dialog!!.getWindow()!!.getDecorView(),
 "Расстояние оповещения"))
 dialog!!.dismiss()
+activity!!.finish()
+}
+
+@Test
+fun speedHudIsPlacedInTopLeftCornerOnPhoneAndCar() {
+val activity = Robolectric.buildActivity(MainActivity::class.java).create().get()
+val phoneRoot = (activity!!.findViewById(android.R.id.content) as ViewGroup).getChildAt(0)
+val phoneHud = findText(phoneRoot!!, "Скорость")!!.getParent() as View
+val phoneParams = phoneHud!!.getLayoutParams() as FrameLayout.LayoutParams
+assertEquals(Gravity.TOP or Gravity.START, phoneParams!!.gravity)
+val density = activity!!.resources.displayMetrics.density
+val scaledDensity = TypedValue.applyDimension(
+TypedValue.COMPLEX_UNIT_SP, 1f, activity!!.resources.displayMetrics)
+assertEquals(Math.round(203f * density), phoneParams!!.width)
+val phoneHudOverlay = phoneHud!!.getParent() as ViewGroup
+assertEquals(Math.round(4f * density), phoneHudOverlay!!.getPaddingLeft())
+assertEquals(Math.round(4f * density), phoneHudOverlay!!.getPaddingTop())
+assertEquals(20f, findText(phoneRoot!!, "Скорость")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(66f, findText(phoneRoot!!, "0")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(19f, findText(phoneRoot!!, "км/ч")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(35f, findText(phoneRoot!!, "—")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(19f, findText(phoneRoot!!, "Объектов впереди нет")!!.getTextSize() / scaledDensity, 0.01f)
+
+val carPresentation = CarMapPresentation(activity, null, carContext())
+val carHud = findText(carPresentation!!.rootView(), "Скорость")!!.getParent() as View
+val carParams = carHud!!.getLayoutParams() as FrameLayout.LayoutParams
+assertEquals(Gravity.TOP or Gravity.START, carParams!!.gravity)
+assertEquals(Math.round(4f * density), carParams!!.leftMargin)
+assertEquals(Math.round(4f * density), carParams!!.topMargin)
+assertEquals(Math.round(225f * density), carParams!!.width)
+assertEquals(20f, findText(carPresentation!!.rootView(), "Скорость")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(66f, findText(carPresentation!!.rootView(), "0")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(19f, findText(carPresentation!!.rootView(), "км/ч")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(35f, findText(carPresentation!!.rootView(), "—")!!.getTextSize() / scaledDensity, 0.01f)
+assertEquals(19f, findText(carPresentation!!.rootView(), "Объектов впереди нет")!!.getTextSize() / scaledDensity, 0.01f)
+
+carPresentation!!.destroy()
 activity!!.finish()
 }
 
@@ -287,6 +343,8 @@ controller.destroy()
 fun carValueSettingsUseSharedRangesAndRussianFormatting() {
 assertSetting(CarValueScreen.Setting.OVERSPEED_THRESHOLD,
 AppSettings.OVERSPEED_THRESHOLD, 0, 20, 1, "10 км/ч")
+assertSetting(CarValueScreen.Setting.LOCATION_ARROW_SCALE,
+AppSettings.LOCATION_ARROW_SCALE, 10, 20, 1, "1,0")
 assertSetting(CarValueScreen.Setting.HUD_TRANSPARENCY,
 AppSettings.HUD_TRANSPARENCY, 0, 80, 5, "10%")
 assertSetting(CarValueScreen.Setting.ZONE_TRANSPARENCY,
@@ -325,6 +383,30 @@ assertEquals(2, hudRefreshes!![0])
 }
 
 @Test
+fun carArrowScaleActionsUseTenthsAndRefreshMap() {
+val carContext = carContext()
+val preferences = carContext!!.getSharedPreferences(
+AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+preferences!!.edit().clear().commit()
+val refreshes = intArrayOf(0)
+val screen = CarValueScreen(carContext,
+CarValueScreen.Setting.LOCATION_ARROW_SCALE, { refreshes!![0]++ })
+val initial = screen!!.onGetTemplate() as PaneTemplate
+
+assertEquals("1,0", initial!!.getPane().getRows().get(0).getTitle().toString())
+click(initial!!.getPane().getActions().get(1))
+assertEquals(11, preferences!!.getInt(AppSettings.LOCATION_ARROW_SCALE, -1))
+assertEquals(1, refreshes!![0])
+assertEquals("1,1", (screen!!.onGetTemplate() as PaneTemplate)
+.getPane().getRows().get(0).getTitle().toString())
+
+preferences!!.edit().putInt(AppSettings.LOCATION_ARROW_SCALE, 20).commit()
+click((screen!!.onGetTemplate() as PaneTemplate).getPane().getActions().get(1))
+assertEquals(20, preferences!!.getInt(AppSettings.LOCATION_ARROW_SCALE, -1))
+assertEquals(2, refreshes!![0])
+}
+
+@Test
 fun carMenuShowsThemeAndRoutesEverySettingsScreen() {
 val carContext = carContext()
 carContext!!.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
@@ -332,39 +414,39 @@ carContext!!.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
 val updates = FakeUpdateController()
 val screen = CarMenuScreen(
 carContext, null, updates, {  })
-val template = screen.onGetTemplate() as ListTemplate
-val items = template!!.getSingleList()!!.getItems()
+val rootTemplate = screen.onGetTemplate() as ListTemplate
+val rootItems = rootTemplate!!.getSingleList()!!.getItems()
 
-assertEquals(Action.TYPE_BACK, template!!.getHeaderAction()!!.getType())
+assertEquals(Action.TYPE_BACK, rootTemplate!!.getHeaderAction()!!.getType())
 assertEquals(Arrays.asList(
-"Обновить базу",
-"Предел превышения скорости",
-"Прозрачность HUD",
-"Прозрачность зон",
-"Прозрачность активной зоны",
-"Отображение зон: Все",
-"Автоповорот карты",
-"Тема: Автоматически",
-"Ключ MapKit",
-"О программе",
-"Выход"), rowTitles(items!!))
+"Оповещения",
+"Карта",
+"Интерфейс",
+"Приложение",
+"Выйти"), rowTitles(rootItems!!))
 
 val screenManager = carContext!!.getCarService(androidx.car.app.ScreenManager::class.java) as TestScreenManager
-val expectedTitles = arrayOf<String?>("Предел превышения скорости", "Прозрачность HUD",
-"Прозрачность зон", "Прозрачность активной зоны")
-for (index in 1..4)
-{
 screenManager!!.reset()
-click(items!!.get(index) as Row)
-val pushed = screenManager!!.getScreensPushed().get(0)
-assertTrue(pushed is CarValueScreen)
-assertEquals(expectedTitles!![index - 1],
-(pushed!!.onGetTemplate() as PaneTemplate).getTitle().toString())
-}
+click(rootItems!!.get(0) as Row)
+val alerts = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
+val alertItems = (alerts!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
+assertEquals(Arrays.asList("Предел превышения скорости"), rowTitles(alertItems!!))
 screenManager!!.reset()
-click(items!!.get(5) as Row)
-assertTrue(screenManager!!.getScreensPushed().get(0) is CarZoneDisplayScreen)
-val autoRotate = items!!.get(6) as Row
+click(alertItems!!.get(0) as Row)
+assertEquals("Предел превышения скорости",
+(screenManager!!.getScreensPushed().get(0)!!.onGetTemplate() as PaneTemplate).getTitle().toString())
+
+screenManager!!.reset()
+click(rootItems!!.get(1) as Row)
+val map = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
+val mapItems = (map!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
+assertEquals(Arrays.asList("Размер стрелки", "Автоповорот карты", "Отображение зон: Все",
+"Прозрачность зон", "Прозрачность активной зоны"), rowTitles(mapItems!!))
+screenManager!!.reset()
+click(mapItems!!.get(0) as Row)
+assertEquals("Размер стрелки",
+(screenManager!!.getScreensPushed().get(0)!!.onGetTemplate() as PaneTemplate).getTitle().toString())
+val autoRotate = mapItems!!.get(1) as Row
 assertFalse(autoRotate!!.getToggle()!!.isChecked())
 autoRotate!!.getToggle()!!.getOnCheckedChangeDelegate().sendCheckedChange(
 true, object:OnDoneCallback {
@@ -374,13 +456,33 @@ assertTrue(carContext!!.getSharedPreferences(
 AppSettings.PREFERENCES, Context.MODE_PRIVATE).getBoolean(
 AppSettings.AUTO_ROTATE_MAP, false))
 screenManager!!.reset()
-click(items!!.get(7) as Row)
-assertTrue(screenManager!!.getScreensPushed().get(0) is CarThemeScreen)
+click(mapItems!!.get(2) as Row)
+assertTrue(screenManager!!.getScreensPushed().get(0) is CarZoneDisplayScreen)
+
 screenManager!!.reset()
-click(items!!.get(8) as Row)
+click(rootItems!!.get(2) as Row)
+val interfaceMenu = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
+val interfaceItems = (interfaceMenu!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
+assertEquals(Arrays.asList("Прозрачность HUD", "Тема: Автоматически"), rowTitles(interfaceItems!!))
+screenManager!!.reset()
+click(interfaceItems!!.get(0) as Row)
+assertEquals("Прозрачность HUD",
+(screenManager!!.getScreensPushed().get(0)!!.onGetTemplate() as PaneTemplate).getTitle().toString())
+screenManager!!.reset()
+click(interfaceItems!!.get(1) as Row)
+assertTrue(screenManager!!.getScreensPushed().get(0) is CarThemeScreen)
+
+screenManager!!.reset()
+click(rootItems!!.get(3) as Row)
+val applicationMenu = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
+val applicationItems = (applicationMenu!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
+assertEquals(Arrays.asList("Обновить базу", "Ключ MapKit", "О программе"),
+rowTitles(applicationItems!!))
+screenManager!!.reset()
+click(applicationItems!!.get(1) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarMapKeyScreen)
 screenManager!!.reset()
-click(items!!.get(9) as Row)
+click(applicationItems!!.get(2) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarAboutScreen)
 }
 
@@ -439,13 +541,18 @@ val updates = FakeUpdateController()
 val exits = intArrayOf(0)
 val screen = CarMenuScreen(
 carContext, null, updates, { exits!![0]++ })
-val items = (screen.onGetTemplate() as ListTemplate)
+val rootItems = (screen.onGetTemplate() as ListTemplate)
 .getSingleList()!!.getItems()
 
-click(items!!.get(0) as Row)
+val screenManager = carContext!!.getCarService(androidx.car.app.ScreenManager::class.java) as TestScreenManager
+click(rootItems!!.get(3) as Row)
+val applicationMenu = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
+val applicationItems = (applicationMenu!!.onGetTemplate() as ListTemplate)
+.getSingleList()!!.getItems()
+click(applicationItems!!.get(0) as Row)
 assertEquals(1, updates.requestCount)
 
-click(items!!.get(10) as Row)
+click(rootItems!!.get(4) as Row)
 assertEquals(1, exits!![0])
 }
 

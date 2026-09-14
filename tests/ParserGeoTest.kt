@@ -172,6 +172,12 @@ verifyDrivingSnapshotAndHud()
 verifyCarMenuItems()
 check((AppSettings.adjustOverspeedThreshold(0, -1) == 0 && AppSettings.adjustOverspeedThreshold(20, 1) == 20),
 "overspeed threshold uses 0..20 with a 1 km/h step")
+check((AppSettings.clampLocationArrowScale(9) == 10
+&& AppSettings.adjustLocationArrowScale(10, -1) == 10
+&& AppSettings.adjustLocationArrowScale(10, 1) == 11
+&& AppSettings.adjustLocationArrowScale(20, 1) == 20
+&& AppSettings.locationArrowScale(15) == 1.5f),
+"location arrow scale uses 1.0..2.0 with a 0.1 step")
 check((AppSettings.adjustHudTransparency(0, -1) == 0
 && AppSettings.adjustHudTransparency(75, 1) == 80
 && AppSettings.adjustHudTransparency(80, 1) == 80),
@@ -411,8 +417,11 @@ if (!condition) throw AssertionError(message)
 }
 
 private fun verifyCarMenuItems() {
-check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY, CarMenuItem.ZONE_DISPLAY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.MAPKIT_KEY, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
-"car menu exposes all actions in display order")
+check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.LOCATION_ARROW_SCALE, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY, CarMenuItem.ZONE_DISPLAY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.MAPKIT_KEY, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
+"car menu exposes all actions")
+check(CarMenuGroup.MAP.items == listOf(CarMenuItem.LOCATION_ARROW_SCALE, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.ZONE_DISPLAY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY)
+&& CarMenuItem.EXIT !in CarMenuGroup.entries.flatMap { it.items },
+"car menu groups map settings and keeps exit at the root")
 }
 
 private fun verifyMapOrientation() {
@@ -602,35 +611,41 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 15, "about dialog contains every known release")
-check((releases!!.get(0).version.equals("4.9.11")
-&& releases!!.get(1).version.equals("4.9.10")
-&& releases!!.get(2).version.equals("4.9.9")
-&& releases!!.get(3).version.equals("4.9.8")
-&& releases!!.get(4).version.equals("4.9.7")
-&& releases!!.get(5).version.equals("4.9.6")
-&& releases!!.get(6).version.equals("4.9.5")
-&& releases!!.get(7).version.equals("4.9.4")
-&& releases!!.get(8).version.equals("4.9.3")
-&& releases!!.get(9).version.equals("4.9.2")
-&& releases!!.get(10).version.equals("4.9.1")
-&& releases!!.get(11).version.equals("4.9.0")
-&& releases!!.get(12).version.equals("4.8.1")
-&& releases!!.get(13).version.equals("4.8.0")
-&& releases!!.get(14).version.equals("4.7.1")),
+check(releases!!.size == 16, "about dialog contains every known release")
+check((releases!!.get(0).version.equals("4.9.12")
+&& releases!!.get(1).version.equals("4.9.11")
+&& releases!!.get(2).version.equals("4.9.10")
+&& releases!!.get(3).version.equals("4.9.9")
+&& releases!!.get(4).version.equals("4.9.8")
+&& releases!!.get(5).version.equals("4.9.7")
+&& releases!!.get(6).version.equals("4.9.6")
+&& releases!!.get(7).version.equals("4.9.5")
+&& releases!!.get(8).version.equals("4.9.4")
+&& releases!!.get(9).version.equals("4.9.3")
+&& releases!!.get(10).version.equals("4.9.2")
+&& releases!!.get(11).version.equals("4.9.1")
+&& releases!!.get(12).version.equals("4.9.0")
+&& releases!!.get(13).version.equals("4.8.1")
+&& releases!!.get(14).version.equals("4.8.0")
+&& releases!!.get(15).version.equals("4.7.1")),
 "release history is newest first")
 for (release in releases!!)
 {
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.11")
+val current = ReleaseHistory.find("4.9.12")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("подтверждённого")
-&& current!!.changes.contains("Android Auto")
-&& current!!.changes.contains("HUD")),
-"current release describes confirmed zones across both interfaces")
+check((current!!.changes.contains("Плашка скорости")
+&& current!!.changes.contains("размера стрелки")
+&& current!!.changes.contains("меню")),
+"current release describes the HUD, arrow scale and grouped menu")
+val previous = ReleaseHistory.find("4.9.11")
+check((previous != null && previous!!.changes.contains("подтверждённого")
+&& previous!!.changes.contains("Android Auto")
+&& previous!!.changes.contains("HUD")),
+"previous release keeps its confirmed-zone description")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }
