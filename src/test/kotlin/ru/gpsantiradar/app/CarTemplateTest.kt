@@ -1054,22 +1054,28 @@ controller.destroy()
 }
 
 @Test
-fun emptyStableAreaRestoresDefaultHudLayout() {
+fun stableAreaKeepsEqualHudInsetsAndEmptyAreaRestoresDefaultWidth() {
 val context = ApplicationProvider.getApplicationContext<Context>()
 val presentation = CarMapPresentation(context, null, carContext())
 val root = presentation.rootView() as FrameLayout
 val hud = root!!.getChildAt(0)
 val defaults = hud!!.getLayoutParams() as FrameLayout.LayoutParams
 val defaultLeft = defaults!!.leftMargin
+val defaultTop = defaults!!.topMargin
 val defaultBottom = defaults!!.bottomMargin
 val defaultWidth = defaults!!.width
 
-presentation.onStableAreaChanged(Rect(100, 20, 700, 400))
-assertTrue(((hud!!.getLayoutParams() as FrameLayout.LayoutParams).leftMargin > defaultLeft))
+presentation.onStableAreaChanged(Rect(100, 20, 250, 400))
+val constrained = hud!!.getLayoutParams() as FrameLayout.LayoutParams
+assertEquals(defaultLeft, constrained!!.leftMargin)
+assertEquals(defaultTop, constrained!!.topMargin)
+assertEquals(defaultBottom, constrained!!.bottomMargin)
+assertTrue(constrained!!.width < defaultWidth)
 presentation.onStableAreaChanged(Rect())
 
 val reset = hud!!.getLayoutParams() as FrameLayout.LayoutParams
 assertEquals(defaultLeft, reset!!.leftMargin)
+assertEquals(defaultTop, reset!!.topMargin)
 assertEquals(defaultBottom, reset!!.bottomMargin)
 assertEquals(defaultWidth, reset!!.width)
 presentation.destroy()
