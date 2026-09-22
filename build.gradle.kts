@@ -1,4 +1,3 @@
-import java.util.Properties
 import com.android.build.api.variant.HasUnitTestBuilder
 import org.gradle.api.tasks.testing.Test
 
@@ -6,16 +5,9 @@ plugins {
     id("com.android.application") version "9.0.1"
 }
 
-val appVersionName = "4.9.12"
+val appVersionName = "4.9.14"
 
-val localProperties = Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localPropertiesFile.inputStream().use(localProperties::load)
-}
-val mapkitApiKey = localProperties.getProperty("MAPKIT_API_KEY", "")
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
+val mapkitApiKey = "74d6077f-f6ce-4e0e-9fca-a2550f5e4036"
 
 android {
     namespace = "ru.gpsantiradar.app"
@@ -25,7 +17,7 @@ android {
         applicationId = "ru.gpsantiradar.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 47
+        versionCode = 49
         versionName = appVersionName
         buildConfigField("String", "MAPKIT_API_KEY", "\"$mapkitApiKey\"")
     }

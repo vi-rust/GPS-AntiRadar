@@ -7,17 +7,15 @@ import kotlin.math.sign
 object AppSettings {
     const val PREFERENCES = "settings"
     const val OVERSPEED_THRESHOLD = "overspeed_threshold_kmh"
-    const val MAPKIT_KEY = "yandex_mapkit_key"
     const val MAPKIT_PENDING = "mapkit_startup_pending"
-    const val MAPKIT_SAFE_MIGRATION = "mapkit_safe_startup_v4"
-    const val MAPKIT_MARKER_FIX = "mapkit_marker_fix_v5"
-    const val MAPKIT_KEY_REENTRY = "mapkit_key_reentry_v6"
     const val HUD_TRANSPARENCY = "hud_transparency"
     const val ZONE_TRANSPARENCY = "zone_transparency"
     const val ACTIVE_ZONE_TRANSPARENCY = "active_zone_transparency"
     const val ZONE_DISPLAY_MODE = "zone_display_mode"
     const val AUTO_ROTATE_MAP = "auto_rotate_map"
     const val LOCATION_ARROW_SCALE = "location_arrow_scale_tenths"
+    const val UI_SCALE_PERCENT = "ui_scale_percent"
+    const val MAP_SCALE_PERCENT = "map_scale_percent"
     const val THEME_MODE = "theme_mode"
     const val THEME_LATITUDE = "theme_latitude"
     const val THEME_LONGITUDE = "theme_longitude"
@@ -33,6 +31,14 @@ object AppSettings {
     const val MIN_LOCATION_ARROW_SCALE_TENTHS = 10
     const val MAX_LOCATION_ARROW_SCALE_TENTHS = 20
     const val LOCATION_ARROW_SCALE_STEP_TENTHS = 1
+    const val DEFAULT_UI_SCALE_PERCENT = 100
+    const val MIN_UI_SCALE_PERCENT = 100
+    const val MAX_UI_SCALE_PERCENT = 200
+    const val UI_SCALE_STEP_PERCENT = 10
+    const val DEFAULT_MAP_SCALE_PERCENT = 100
+    const val MIN_MAP_SCALE_PERCENT = 100
+    const val MAX_MAP_SCALE_PERCENT = 500
+    const val MAP_SCALE_STEP_PERCENT = 10
     const val MIN_HUD_TRANSPARENCY_PERCENT = 0
     const val MAX_HUD_TRANSPARENCY_PERCENT = 80
     const val HUD_TRANSPARENCY_STEP_PERCENT = 5
@@ -74,6 +80,20 @@ object AppSettings {
         )
 
     fun locationArrowScale(value: Int): Float = clampLocationArrowScale(value) / 10f
+
+    fun normalizeUiScalePercent(value: Int): Int {
+        val clamped = max(MIN_UI_SCALE_PERCENT, min(MAX_UI_SCALE_PERCENT, value))
+        val steps = (clamped - MIN_UI_SCALE_PERCENT + UI_SCALE_STEP_PERCENT / 2) /
+            UI_SCALE_STEP_PERCENT
+        return MIN_UI_SCALE_PERCENT + steps * UI_SCALE_STEP_PERCENT
+    }
+
+    fun normalizeMapScalePercent(value: Int): Int {
+        val clamped = max(MIN_MAP_SCALE_PERCENT, min(MAX_MAP_SCALE_PERCENT, value))
+        val steps = (clamped - MIN_MAP_SCALE_PERCENT + MAP_SCALE_STEP_PERCENT / 2) /
+            MAP_SCALE_STEP_PERCENT
+        return MIN_MAP_SCALE_PERCENT + steps * MAP_SCALE_STEP_PERCENT
+    }
 
     private fun floorToStep(value: Int, minValue: Int, maxValue: Int, step: Int): Int {
         val clamped = max(minValue, min(maxValue, value))

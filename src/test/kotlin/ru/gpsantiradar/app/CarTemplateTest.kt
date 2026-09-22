@@ -36,7 +36,6 @@ import androidx.car.app.model.LongMessageTemplate
 import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.PaneTemplate
 import androidx.car.app.model.Row
-import androidx.car.app.model.SearchTemplate
 import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.TestAppManager
@@ -61,12 +60,12 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.12", BuildConfig.VERSION_NAME)
+assertEquals("4.9.14", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("Плашка скорости"))
-assertTrue(release!!.changes.contains("размера стрелки"))
-assertTrue(release!!.changes.contains("меню"))
+assertTrue(release!!.changes.contains("масштаба интерфейса"))
+assertTrue(release!!.changes.contains("слайдер"))
+assertTrue(release!!.changes.contains("100%"))
 }
 
 @Test @Throws(Exception::class)
@@ -476,13 +475,10 @@ screenManager!!.reset()
 click(rootItems!!.get(3) as Row)
 val applicationMenu = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
 val applicationItems = (applicationMenu!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
-assertEquals(Arrays.asList("Обновить базу", "Ключ MapKit", "О программе"),
+assertEquals(Arrays.asList("Обновить базу", "О программе"),
 rowTitles(applicationItems!!))
 screenManager!!.reset()
 click(applicationItems!!.get(1) as Row)
-assertTrue(screenManager!!.getScreensPushed().get(0) is CarMapKeyScreen)
-screenManager!!.reset()
-click(applicationItems!!.get(2) as Row)
 assertTrue(screenManager!!.getScreensPushed().get(0) is CarAboutScreen)
 }
 
@@ -597,40 +593,6 @@ assertEquals(2, resources.size)
 assertNull(resources.get(0).restoredState)
 assertEquals(expected, resources.get(1).restoredState)
 controller.destroy()
-}
-
-@Test
-fun mapKeyScreenRejectsBlankAndPersistsTrimmedKey() {
-val carContext = carContext()
-val context = carContext
-context!!.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
-.edit().clear().commit()
-val template = CarMapKeyScreen(carContext).onGetTemplate() as SearchTemplate
-
-assertEquals(Action.TYPE_BACK, template!!.getHeaderAction()!!.getType())
-assertEquals("Ключ Yandex MapKit", template!!.getSearchHint())
-assertTrue(template!!.isShowKeyboardByDefault())
-assertTrue((template!!.getItemList()!!.getItems().get(0) as Row)
-.getTexts().get(0).toString().contains("телефоне"))
-
-template!!.getSearchCallbackDelegate()!!.sendSearchSubmitted(
-"   ", object:OnDoneCallback {
-
-})
-assertFalse(context!!.getSharedPreferences(
-AppSettings.PREFERENCES, Context.MODE_PRIVATE)
-.contains(AppSettings.MAPKIT_KEY))
-
-template!!.getSearchCallbackDelegate()!!.sendSearchSubmitted(
-"  test-map-key  ", object:OnDoneCallback {
-
-})
-assertEquals("test-map-key", context!!.getSharedPreferences(
-AppSettings.PREFERENCES, Context.MODE_PRIVATE)
-.getString(AppSettings.MAPKIT_KEY, ""))
-val appManager = carContext!!.getCarService(AppManager::class.java) as TestAppManager
-assertTrue(appManager!!.getToastsShown().get(0).toString().contains("пустым"))
-assertTrue(appManager!!.getToastsShown().get(1).toString().contains("перезапустите"))
 }
 
 @Test

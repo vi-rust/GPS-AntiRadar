@@ -24,13 +24,14 @@ class StrelkaSoundPlayer(context: Context) :
         .build()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val queue = ArrayDeque<Clip>()
+    private val retiringPlayers = mutableSetOf<MediaPlayer>()
     private var player: MediaPlayer? = null
     private var focusRequest: AudioFocusRequest? = null
     private var audioFocusHeld = false
     private var released = false
     private val scheduledFocusAbandon = Runnable {
         synchronized(this) {
-            if (player == null && queue.isEmpty()) abandonAudioFocus()
+            if (player == null && queue.isEmpty() && retiringPlayers.isEmpty()) abandonAudioFocus()
         }
     }
 
@@ -194,7 +195,7 @@ class StrelkaSoundPlayer(context: Context) :
             releasePlayer(mediaPlayer)
             return
         }
-        releaseCurrent()
+        retainCompletedPlayer(mediaPlayer)
         playNextIfIdle()
     }
 
@@ -216,7 +217,19 @@ class StrelkaSoundPlayer(context: Context) :
         mainHandler.removeCallbacks(scheduledFocusAbandon)
         queue.clear()
         releaseCurrent()
+        retiringPlayers.forEach(::releasePlayer)
+        retiringPlayers.clear()
         abandonAudioFocus()
+    }
+
+    private fun retainCompletedPlayer(completed: MediaPlayer) {
+        player = null
+        retiringPlayers.add(completed)
+        mainHandler.postDelayed({
+            synchronized(this@StrelkaSoundPlayer) {
+                if (retiringPlayers.remove(completed)) releasePlayer(completed)
+            }
+        }, PLAYBACK_TAIL_RELEASE_DELAY_MS)
     }
 
     private fun releaseCurrent() {
@@ -236,7 +249,9 @@ class StrelkaSoundPlayer(context: Context) :
     private data class Clip(val name: String, val volume: Float)
 
     companion object {
-        private const val AUDIO_FOCUS_RELEASE_DELAY_MS = 250L
+        // The GWM audio HAL still has roughly half a second buffered when MediaPlayer reports completion.
+        private const val PLAYBACK_TAIL_RELEASE_DELAY_MS = 750L
+        private const val AUDIO_FOCUS_RELEASE_DELAY_MS = 1000L
         private val SPOKEN_SPEEDS = setOf(20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130)
     }
 }

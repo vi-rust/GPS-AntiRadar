@@ -197,6 +197,22 @@ check((AppSettings.clampZoneTransparency(0) == 10
 && AppSettings.adjustZoneTransparency(10, -1) == 10
 && AppSettings.adjustZoneTransparency(85, 1) == 90),
 "zone transparency uses 10..90 with a 5 percent step")
+check((AppSettings.DEFAULT_UI_SCALE_PERCENT == 100
+&& AppSettings.normalizeUiScalePercent(0) == 100
+&& AppSettings.normalizeUiScalePercent(99) == 100
+&& AppSettings.normalizeUiScalePercent(104) == 100
+&& AppSettings.normalizeUiScalePercent(105) == 110
+&& AppSettings.normalizeUiScalePercent(176) == 180
+&& AppSettings.normalizeUiScalePercent(220) == 200),
+"UI scale defaults to 100 and normalizes 100..200 to 10 percent steps")
+check((AppSettings.DEFAULT_MAP_SCALE_PERCENT == 100
+&& AppSettings.normalizeMapScalePercent(0) == 100
+&& AppSettings.normalizeMapScalePercent(104) == 100
+&& AppSettings.normalizeMapScalePercent(105) == 110
+&& AppSettings.normalizeMapScalePercent(176) == 180
+&& AppSettings.normalizeMapScalePercent(496) == 500
+&& AppSettings.normalizeMapScalePercent(520) == 500),
+"map scale defaults to 100 and normalizes 100..500 to 10 percent steps")
 check(ZoneDisplayMode.fromStored(null) == ZoneDisplayMode.ALL
 && ZoneDisplayMode.fromStored("ACTIVE_ONLY") == ZoneDisplayMode.ACTIVE_ONLY
 && ZoneDisplayMode.fromStored("invalid") == ZoneDisplayMode.ALL,
@@ -417,7 +433,7 @@ if (!condition) throw AssertionError(message)
 }
 
 private fun verifyCarMenuItems() {
-check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.LOCATION_ARROW_SCALE, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY, CarMenuItem.ZONE_DISPLAY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.MAPKIT_KEY, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
+check(java.util.Arrays.equals(CarMenuItem.values(), arrayOf<CarMenuItem?>(CarMenuItem.UPDATE_DATABASE, CarMenuItem.OVERSPEED_THRESHOLD, CarMenuItem.LOCATION_ARROW_SCALE, CarMenuItem.HUD_TRANSPARENCY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY, CarMenuItem.ZONE_DISPLAY, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.THEME, CarMenuItem.ABOUT, CarMenuItem.EXIT)),
 "car menu exposes all actions")
 check(CarMenuGroup.MAP.items == listOf(CarMenuItem.LOCATION_ARROW_SCALE, CarMenuItem.AUTO_ROTATE_MAP, CarMenuItem.ZONE_DISPLAY, CarMenuItem.ZONE_TRANSPARENCY, CarMenuItem.ACTIVE_ZONE_TRANSPARENCY)
 && CarMenuItem.EXIT !in CarMenuGroup.entries.flatMap { it.items },
@@ -611,41 +627,29 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 16, "about dialog contains every known release")
-check((releases!!.get(0).version.equals("4.9.12")
-&& releases!!.get(1).version.equals("4.9.11")
-&& releases!!.get(2).version.equals("4.9.10")
-&& releases!!.get(3).version.equals("4.9.9")
-&& releases!!.get(4).version.equals("4.9.8")
-&& releases!!.get(5).version.equals("4.9.7")
-&& releases!!.get(6).version.equals("4.9.6")
-&& releases!!.get(7).version.equals("4.9.5")
-&& releases!!.get(8).version.equals("4.9.4")
-&& releases!!.get(9).version.equals("4.9.3")
-&& releases!!.get(10).version.equals("4.9.2")
-&& releases!!.get(11).version.equals("4.9.1")
-&& releases!!.get(12).version.equals("4.9.0")
-&& releases!!.get(13).version.equals("4.8.1")
-&& releases!!.get(14).version.equals("4.8.0")
-&& releases!!.get(15).version.equals("4.7.1")),
+check(releases!!.size == 18, "about dialog contains every known release")
+check(releases!!.map { it.version } == listOf(
+"4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
+"4.9.6", "4.9.5", "4.9.4", "4.9.3", "4.9.2", "4.9.1", "4.9.0",
+"4.8.1", "4.8.0", "4.7.1"),
 "release history is newest first")
 for (release in releases!!)
 {
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.12")
+val current = ReleaseHistory.find("4.9.14")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("Плашка скорости")
-&& current!!.changes.contains("размера стрелки")
-&& current!!.changes.contains("меню")),
-"current release describes the HUD, arrow scale and grouped menu")
-val previous = ReleaseHistory.find("4.9.11")
-check((previous != null && previous!!.changes.contains("подтверждённого")
-&& previous!!.changes.contains("Android Auto")
-&& previous!!.changes.contains("HUD")),
-"previous release keeps its confirmed-zone description")
+check((current!!.changes.contains("масштаба интерфейса")
+&& current!!.changes.contains("слайдер")
+&& current!!.changes.contains("100%")),
+"current release describes slider-based in-app scaling")
+val previous = ReleaseHistory.find("4.9.13")
+check((previous != null && previous!!.changes.contains("звуковых оповещений")
+&& previous!!.changes.contains("MapKit")
+&& previous!!.changes.contains("встроен")),
+"previous release keeps its audio-tail and embedded MapKit key description")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

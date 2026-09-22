@@ -10,7 +10,6 @@ enum class CarMenuItem {
     ZONE_DISPLAY,
     AUTO_ROTATE_MAP,
     THEME,
-    MAPKIT_KEY,
     ABOUT,
     EXIT
 }
@@ -30,7 +29,6 @@ enum class CarMenuGroup(val items: List<CarMenuItem>) {
     APPLICATION(
         listOf(
             CarMenuItem.UPDATE_DATABASE,
-            CarMenuItem.MAPKIT_KEY,
             CarMenuItem.ABOUT,
         ),
     ),

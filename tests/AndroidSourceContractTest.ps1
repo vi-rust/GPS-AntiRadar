@@ -44,12 +44,13 @@ $RequiredSources = @(
     "RadarBaseUpdater", "SharedCameraMapLayer", "StrelkaAlertAlgorithm",
     "StrelkaAlertTracker", "StrelkaSoundPlayer", "TrackingService", "GpsCarAppService", "GpsCarSession",
     "CarSurfaceController", "CarMapPresentation", "CarMapGestureController",
-    "CarMapScreen", "CarMenuScreen", "CarValueScreen", "CarMapKeyScreen",
+    "CarMapScreen", "CarMenuScreen", "CarValueScreen",
     "CarAboutScreen", "ZoneDisplayMode", "CarZoneDisplayScreen", "CarMapCameraState"
 )
 foreach ($Name in $RequiredSources) { [void](Read-Source $Name) }
 
 $Database = Read-Source "CameraDatabase"
+$Settings = Read-Source "AppSettings"
 $Tracking = Read-Source "TrackingService"
 $Algorithm = Read-Source "StrelkaAlertAlgorithm"
 $SoundPlayer = Read-Source "StrelkaSoundPlayer"
@@ -62,7 +63,6 @@ $CarPresentation = Read-Source "CarMapPresentation"
 $CarGestures = Read-Source "CarMapGestureController"
 $CarMenu = Read-Source "CarMenuScreen"
 $CarValue = Read-Source "CarValueScreen"
-$CarMapKey = Read-Source "CarMapKeyScreen"
 $CarAbout = Read-Source "CarAboutScreen"
 
 Assert-Contains $Database 'setWriteAheadLoggingEnabled\(true\)' "CameraDatabase must enable WAL"
@@ -92,6 +92,8 @@ Assert-Contains $Algorithm 'speedKmh > limit \+ AppSettings\.clampOverspeedThres
 Assert-Contains $SoundPlayer 'USAGE_ASSISTANCE_NAVIGATION_GUIDANCE' "Voice alerts must use navigation-guidance audio routing"
 Assert-Contains $SoundPlayer 'add\("cam_stop_voice\.mp3", 1f\)[\s\S]*playNextIfIdle\(\)' "The object-finished phrase must follow the common sound queue rules"
 Assert-Contains $SoundPlayer 'scheduleAudioFocusAbandon\(\)' "Audio focus must remain active briefly after playback"
+Assert-Contains $SoundPlayer 'PLAYBACK_TAIL_RELEASE_DELAY_MS = 750L' "Completed players must retain the GWM audio tail"
+Assert-Contains $SoundPlayer 'retiringPlayers\.add\(completed\)' "Completed players must not be released synchronously"
 
 Assert-Contains $SharedMapLayer 'val latPadding = \(north - south\) \* 0\.20' "Latitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'val lonPadding = \(east - west\) \* 0\.20' "Longitude viewport padding must remain 20 percent"
@@ -121,6 +123,26 @@ Assert-Contains $Activity 'AppSettings\.ZONE_TRANSPARENCY' "Phone menu must expo
 Assert-Contains $Activity 'AppSettings\.ZONE_DISPLAY_MODE' "Phone menu must expose zone visibility"
 Assert-Contains $Activity 'showMenuDialog\(' "Phone settings must be split into thematic submenus"
 Assert-Contains $Activity 'AppSettings\.LOCATION_ARROW_SCALE' "Phone menu must expose location arrow scale"
+Assert-Contains $Activity 'AppSettings\.UI_SCALE_PERCENT' "Interface menu must expose in-app UI scale"
+Assert-Contains $Activity 'resources\.displayMetrics\.density \* uiScaleFactor' "In-app UI scale must affect dimensions without changing system density"
+Assert-Contains $Activity 'textSize = scaledSp\(sp\)' "In-app UI scale must affect application text"
+Assert-Contains $Activity 'mapWindow\.setScaleFactor\(mapScaleFactor\)' "MapKit rendering must use its independent map scale"
+Assert-Contains $Settings 'DEFAULT_UI_SCALE_PERCENT = 100' "UI scale must default to 100 percent"
+Assert-Contains $Settings 'MIN_UI_SCALE_PERCENT = 100' "UI scale minimum must remain 100 percent"
+Assert-Contains $Settings 'MAX_UI_SCALE_PERCENT = 200' "UI scale maximum must remain 200 percent"
+Assert-Contains $Settings 'UI_SCALE_STEP_PERCENT = 10' "UI scale step must remain 10 percent"
+Assert-Contains $Activity 'private fun uiScaleRow\(\): LinearLayout' "Interface scale must be controlled by an inline slider"
+Assert-Contains $Activity 'max = \(AppSettings\.MAX_UI_SCALE_PERCENT - AppSettings\.MIN_UI_SCALE_PERCENT\)' "UI scale slider must cover the configured range"
+if ($Activity -match 'showUiScaleDialog') { throw "UI scale must not use a separate selection dialog" }
+Assert-Contains $Settings 'DEFAULT_MAP_SCALE_PERCENT = 100' "Map scale must default to MapKit's native 100 percent"
+Assert-Contains $Settings 'MIN_MAP_SCALE_PERCENT = 100' "Map scale minimum must remain 100 percent"
+Assert-Contains $Settings 'MAX_MAP_SCALE_PERCENT = 500' "Map scale maximum must remain 500 percent"
+Assert-Contains $Settings 'MAP_SCALE_STEP_PERCENT = 10' "Map scale step must remain 10 percent"
+Assert-Contains $Activity 'private fun mapScaleRow\(\): LinearLayout' "Map menu must expose an independent map scale slider"
+Assert-Contains $Activity 'AppSettings\.MAP_SCALE_PERCENT' "Map scale slider must persist independently from UI scale"
+Assert-Contains $Activity 'private fun trackSettingsMenuDialog\(' "Settings dialogs must share a menu-session lifecycle"
+Assert-Contains $Activity 'settingsMenuDialogCount == 0\) applyScaleSettingsIfChanged\(\)' "Scale settings must be applied only after the complete menu closes"
+Assert-Contains $Activity 'private fun applyScaleSettingsIfChanged\(\)[\s\S]*?recreate\(\)' "A changed UI or map scale must recreate the application screen after menu exit"
 Assert-Contains $Activity 'Gravity\.TOP or Gravity\.START' "Phone HUD must be placed in the top-left corner"
 Assert-Contains $Activity 'FrameLayout\.LayoutParams\(dp\(203\)' "Phone HUD width must be reduced by one quarter"
 Assert-Contains $Activity 'setPadding\(dp\(4\), dp\(4\), 0, 0\)' "Phone HUD must use a minimal non-zero inset"
@@ -167,19 +189,21 @@ Assert-Contains $CarValue 'AppSettings\.adjustLocationArrowScale' "Car settings 
 Assert-Contains $CarValue 'AppSettings\.adjustHudTransparency' "Car settings must reuse shared transparency rules"
 Assert-Contains $CarValue 'AppSettings\.adjustZoneTransparency' "Car settings must reuse shared zone transparency rules"
 Assert-Contains $CarValue '\.commit\(\)' "Car numeric settings must be synchronous"
-Assert-Contains $CarMapKey 'SearchTemplate\.Builder' "Car MapKit key input must use SearchTemplate"
-Assert-Contains $CarMapKey '\.trim\(\)' "Car MapKit key must be trimmed"
 Assert-Contains $CarAbout 'LongMessageTemplate\.Builder' "Car About must use LongMessageTemplate"
 Assert-Contains $CarAbout 'CameraDatabase\(carContext\)' "Car About must read the shared database"
 
 $BuildGradle = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Project "build.gradle.kts")
 Assert-Contains $BuildGradle "plugins\s*\{[\s\S]*com\.android\.application.*9\.0\.1" "AGP 9.0.1 must provide built-in Kotlin"
+Assert-Contains $BuildGradle 'val mapkitApiKey = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"' "MapKit key must be embedded at build time"
+if ($Activity -match 'showMapKeyDialog' -or $CarMenu -match 'CarMapKeyScreen') {
+    throw "MapKit key input must not be exposed in application settings"
+}
 Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Test Kotlin source directory is missing"
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*47' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.12"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*49' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.14"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

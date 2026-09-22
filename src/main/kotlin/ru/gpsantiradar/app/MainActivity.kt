@@ -23,7 +23,6 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -64,13 +63,15 @@ class MainActivity : Activity() {
     private var mapView: MapView? = null
     private var cameraMapLayer: SharedCameraMapLayer? = null
     private var mapInitialized = false
-    private var mapRecoveryRequired = false
     private var hasCurrentLocation = false
     private var darkTheme = false
     private var databaseEmpty = false
     private var trackingStopped = false
     private var settingsListenerRegistered = false
     private var hintGeneration = 0
+    private var uiScaleFactor = 1f
+    private var mapScaleFactor = 1f
+    private var settingsMenuDialogCount = 0
     private var latestSnapshot = DrivingSnapshot.idle()
     private lateinit var settingsPreferences: SharedPreferences
 
@@ -152,6 +153,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         settingsPreferences = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+        uiScaleFactor = selectedUiScalePercent() / 100f
+        mapScaleFactor = selectedMapScalePercent() / 100f
         darkTheme = ThemeSettings.isDark(this)
         setTheme(if (darkTheme) R.style.AppThemeDark else R.style.AppTheme)
         super.onCreate(state)
@@ -203,49 +206,16 @@ class MainActivity : Activity() {
 
     private fun initializeMapKitSafely(): Boolean {
         val preferences = getSharedPreferences(SETTINGS, MODE_PRIVATE)
-
-        if (!preferences.getBoolean(AppSettings.MAPKIT_KEY_REENTRY, false)) {
-            val hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY)
-            preferences.edit().putBoolean(AppSettings.MAPKIT_KEY_REENTRY, true)
-                .remove(AppSettings.MAPKIT_KEY)
-                .remove(AppSettings.MAPKIT_PENDING).commit()
-            mapRecoveryRequired = hadStoredKey
-            if (hadStoredKey) return false
-        }
-
-        if (!preferences.getBoolean(AppSettings.MAPKIT_MARKER_FIX, false)) {
-            preferences.edit().putBoolean(AppSettings.MAPKIT_MARKER_FIX, true)
-                .remove(AppSettings.MAPKIT_PENDING).commit()
-        }
-
-        if (!preferences.getBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, false)) {
-            val hadStoredKey = preferences.contains(AppSettings.MAPKIT_KEY)
-            preferences.edit()
-                .putBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, true)
-                .remove(AppSettings.MAPKIT_KEY)
-                .remove(AppSettings.MAPKIT_PENDING)
-                .commit()
-            mapRecoveryRequired = hadStoredKey
-            if (hadStoredKey) return false
-        }
-
         if (preferences.getBoolean(AppSettings.MAPKIT_PENDING, false)) {
-            preferences.edit().remove(AppSettings.MAPKIT_KEY)
-                .remove(AppSettings.MAPKIT_PENDING).commit()
-            mapRecoveryRequired = true
+            preferences.edit().remove(AppSettings.MAPKIT_PENDING).commit()
             return false
         }
-
-        val savedKey = preferences.getString(AppSettings.MAPKIT_KEY, "")
-        val embeddedKey = BuildConfig.MAPKIT_API_KEY?.trim().orEmpty()
-        if (savedKey.isNullOrBlank() && embeddedKey.isEmpty()) return false
+        if (BuildConfig.MAPKIT_API_KEY.isBlank()) return false
 
         preferences.edit().putBoolean(AppSettings.MAPKIT_PENDING, true).commit()
         val initialized = GpsAntiRadarApplication.ensureMapKit(this)
         if (!initialized) {
-            preferences.edit().remove(AppSettings.MAPKIT_KEY)
-                .remove(AppSettings.MAPKIT_PENDING).commit()
-            mapRecoveryRequired = true
+            preferences.edit().remove(AppSettings.MAPKIT_PENDING).commit()
         }
         return initialized
     }
@@ -258,6 +228,7 @@ class MainActivity : Activity() {
             try {
                 val view = MapView(this)
                 mapView = view
+                view.mapWindow.setScaleFactor(mapScaleFactor)
                 screen.addView(view, FrameLayout.LayoutParams(-1, -1))
                 val layer = SharedCameraMapLayer(
                     this,
@@ -288,15 +259,13 @@ class MainActivity : Activity() {
                 cameraMapLayer = null
                 mapView = null
                 mapInitialized = false
-                mapRecoveryRequired = true
                 getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                    .remove(AppSettings.MAPKIT_KEY)
                     .remove(AppSettings.MAPKIT_PENDING).commit()
             }
         }
         if (!mapInitialized) {
             mapNoticeView = text(
-                "Для Яндекс-карты нужен ключ MapKit",
+                "Не удалось инициализировать Яндекс-карту",
                 20,
                 secondaryTextColor(),
                 Typeface.BOLD,
@@ -453,11 +422,11 @@ class MainActivity : Activity() {
             content.addView(it, LinearLayout.LayoutParams(-1, dp(54)))
         }
         val dialog = showMenuDialog("Меню", content)
-        alerts.setOnClickListener { dialog.dismiss(); showAlertsMenu() }
-        map.setOnClickListener { dialog.dismiss(); showMapMenu() }
-        interfaceSettings.setOnClickListener { dialog.dismiss(); showInterfaceMenu() }
-        applicationSettings.setOnClickListener { dialog.dismiss(); showApplicationMenu() }
-        exit.setOnClickListener { dialog.dismiss(); exitApplication() }
+        alerts.setOnClickListener { showAlertsMenu(); dialog.dismiss() }
+        map.setOnClickListener { showMapMenu(); dialog.dismiss() }
+        interfaceSettings.setOnClickListener { showInterfaceMenu(); dialog.dismiss() }
+        applicationSettings.setOnClickListener { showApplicationMenu(); dialog.dismiss() }
+        exit.setOnClickListener { exitApplication(); dialog.dismiss() }
     }
 
     private fun showAlertsMenu() {
@@ -468,6 +437,7 @@ class MainActivity : Activity() {
 
     private fun showMapMenu() {
         val content = menuContent()
+        content.addView(mapScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
         content.addView(locationArrowScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
         content.addView(autoRotateRow(), LinearLayout.LayoutParams(-1, dp(54)))
         val zoneDisplayMode = ZoneDisplayMode.fromStored(
@@ -495,24 +465,27 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, dp(86)),
         )
         val dialog = showMenuDialog("Карта", content, backToRoot = true)
-        zoneDisplay.setOnClickListener { dialog.dismiss(); showZoneDisplayDialog() }
+        zoneDisplay.setOnClickListener { showZoneDisplayDialog(); dialog.dismiss() }
     }
 
     private fun showInterfaceMenu() {
         val content = menuContent()
         content.addView(hudTransparencyRow(), LinearLayout.LayoutParams(-1, dp(86)))
+        content.addView(uiScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
         val theme = menuAction(R.drawable.ic_theme, "Тема: ${ThemeSettings.mode(this).title()}")
         content.addView(theme, LinearLayout.LayoutParams(-1, dp(54)))
         val dialog = showMenuDialog("Интерфейс", content, backToRoot = true)
-        theme.setOnClickListener { dialog.dismiss(); showThemeDialog() }
+        theme.setOnClickListener {
+            showThemeDialog()
+            dialog.dismiss()
+        }
     }
 
     private fun showApplicationMenu() {
         val content = menuContent()
         val update = menuAction(R.drawable.ic_refresh, "Обновить базу объектов")
-        val mapKey = menuAction(R.drawable.ic_key, "Ключ MapKit")
         val about = menuAction(R.drawable.ic_info, "О программе")
-        listOf(update, mapKey, about).forEach {
+        listOf(update, about).forEach {
             content.addView(it, LinearLayout.LayoutParams(-1, dp(54)))
         }
         val dialog = showMenuDialog("Приложение", content, backToRoot = true)
@@ -520,8 +493,7 @@ class MainActivity : Activity() {
             dialog.dismiss()
             (application as GpsAntiRadarApplication).radarBaseUpdater().requestUpdate()
         }
-        mapKey.setOnClickListener { dialog.dismiss(); showMapKeyDialog() }
-        about.setOnClickListener { dialog.dismiss(); showAboutDialog() }
+        about.setOnClickListener { showAboutDialog(); dialog.dismiss() }
     }
 
     private fun menuContent(): LinearLayout = LinearLayout(this).apply {
@@ -546,9 +518,22 @@ class MainActivity : Activity() {
             }
             .create()
             .also { dialog ->
+                trackSettingsMenuDialog(dialog)
                 dialog.show()
                 styleRoundedDialog(dialog)
             }
+    }
+
+    private fun trackSettingsMenuDialog(
+        dialog: AlertDialog,
+        afterDismiss: () -> Unit = {},
+    ) {
+        settingsMenuDialogCount++
+        dialog.setOnDismissListener {
+            afterDismiss()
+            settingsMenuDialogCount = max(0, settingsMenuDialogCount - 1)
+            if (settingsMenuDialogCount == 0) applyScaleSettingsIfChanged()
+        }
     }
 
     private fun overspeedThresholdRow(): LinearLayout {
@@ -666,7 +651,7 @@ class MainActivity : Activity() {
         row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
         val toggle = Switch(this).apply {
             text = "Автоповорот карты"
-            textSize = 15f
+            textSize = scaledSp(15)
             setTextColor(primaryTextColor())
             isChecked = settingsPreferences.getBoolean(
                 AppSettings.AUTO_ROTATE_MAP,
@@ -772,6 +757,7 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Отмена", null)
             .create()
+        trackSettingsMenuDialog(dialog)
         dialog.show()
         styleRoundedDialog(dialog)
     }
@@ -784,16 +770,107 @@ class MainActivity : Activity() {
             .setTitle("Тема")
             .setSingleChoiceItems(titles, current.ordinal) { choice, which ->
                 val selected = modes[which]
-                choice.dismiss()
                 if (selected != ThemeSettings.mode(this@MainActivity)) {
                     ThemeSettings.setMode(this@MainActivity, selected)
                     refreshThemeIfNeeded()
                 }
+                choice.dismiss()
             }
             .setNegativeButton("Отмена", null)
             .create()
+        trackSettingsMenuDialog(dialog)
         dialog.show()
         styleRoundedDialog(dialog)
+    }
+
+    private fun uiScaleRow(): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_car_zoom_in)
+            tintIcon(this)
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        row.addView(controls, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            setMargins(dp(14), 0, 0, 0)
+        })
+        val selected = selectedUiScalePercent()
+        val valueLabel = text("Масштаб интерфейса: $selected%", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(valueLabel)
+        val seekBar = SeekBar(this).apply {
+            max = (AppSettings.MAX_UI_SCALE_PERCENT - AppSettings.MIN_UI_SCALE_PERCENT) /
+                AppSettings.UI_SCALE_STEP_PERCENT
+            progress = (selected - AppSettings.MIN_UI_SCALE_PERCENT) /
+                AppSettings.UI_SCALE_STEP_PERCENT
+        }
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.MIN_UI_SCALE_PERCENT +
+                    progress * AppSettings.UI_SCALE_STEP_PERCENT
+                valueLabel.text = "Масштаб интерфейса: $value%"
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val value = AppSettings.MIN_UI_SCALE_PERCENT +
+                    seekBar.progress * AppSettings.UI_SCALE_STEP_PERCENT
+                settingsPreferences.edit()
+                    .putInt(AppSettings.UI_SCALE_PERCENT, value)
+                    .commit()
+            }
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
+    }
+
+    private fun mapScaleRow(): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_car_zoom_in)
+            tintIcon(this)
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        row.addView(controls, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            setMargins(dp(14), 0, 0, 0)
+        })
+        val selected = selectedMapScalePercent()
+        val valueLabel = text("Масштаб карты: $selected%", 15, primaryTextColor(), Typeface.NORMAL)
+        controls.addView(valueLabel)
+        val seekBar = SeekBar(this).apply {
+            max = (AppSettings.MAX_MAP_SCALE_PERCENT - AppSettings.MIN_MAP_SCALE_PERCENT) /
+                AppSettings.MAP_SCALE_STEP_PERCENT
+            progress = (selected - AppSettings.MIN_MAP_SCALE_PERCENT) /
+                AppSettings.MAP_SCALE_STEP_PERCENT
+        }
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val value = AppSettings.MIN_MAP_SCALE_PERCENT +
+                    progress * AppSettings.MAP_SCALE_STEP_PERCENT
+                valueLabel.text = "Масштаб карты: $value%"
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val value = AppSettings.MIN_MAP_SCALE_PERCENT +
+                    seekBar.progress * AppSettings.MAP_SCALE_STEP_PERCENT
+                settingsPreferences.edit()
+                    .putInt(AppSettings.MAP_SCALE_PERCENT, value)
+                    .commit()
+            }
+        })
+        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        return row
     }
 
     private fun showAboutDialog() {
@@ -885,7 +962,7 @@ class MainActivity : Activity() {
             .setView(scroll)
             .setNegativeButton("Закрыть", null)
             .create()
-        dialog.setOnDismissListener {
+        trackSettingsMenuDialog(dialog) {
             aboutDatabaseCountView = null
             aboutLastDownloadView = null
         }
@@ -978,55 +1055,6 @@ class MainActivity : Activity() {
             }.start()
     }
 
-    private fun showMapKeyDialog() {
-        val input = EditText(this).apply {
-            setSingleLine(true)
-            hint = "API-ключ MapKit Mobile SDK"
-            setTextColor(primaryTextColor())
-            setHintTextColor(secondaryTextColor())
-            setPadding(dp(16), dp(8), dp(16), dp(8))
-            background = roundedBackground(inputSurfaceColor(), 7)
-        }
-        val message = if (mapRecoveryRequired) {
-            "Предыдущий ключ был отклонён сервером. Вставьте действующий ключ из раздела «MapKit – мобильный SDK». После сохранения полностью закройте и заново откройте приложение."
-        } else {
-            "Вставьте ключ из раздела «Интерфейсы API → MapKit – мобильный SDK». После сохранения полностью закройте и заново откройте приложение."
-        }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(4))
-        }
-        content.addView(
-            text("$message Ключ хранится только на телефоне.", 14, primaryTextColor(), Typeface.NORMAL),
-            LinearLayout.LayoutParams(-1, -2),
-        )
-        content.addView(input, LinearLayout.LayoutParams(-1, dp(52)).apply {
-            setMargins(0, dp(10), 0, 0)
-        })
-        val dialog = AlertDialog.Builder(this, dialogTheme())
-            .setView(content)
-            .setNegativeButton("Позже", null)
-            .setPositiveButton("Сохранить") { _, _ ->
-                val value = input.text.toString().trim()
-                if (value.isNotEmpty()) {
-                    getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
-                        .putString(AppSettings.MAPKIT_KEY, value)
-                        .remove(AppSettings.MAPKIT_PENDING)
-                        .putBoolean(AppSettings.MAPKIT_SAFE_MIGRATION, true)
-                        .commit()
-                    mapRecoveryRequired = false
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Ключ сохранён. Полностью закройте и откройте приложение",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
-            }
-            .create()
-        dialog.show()
-        styleRoundedDialog(dialog)
-    }
-
     private fun styleRoundedDialog(dialog: AlertDialog) {
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         val parentPanelId = resources.getIdentifier("parentPanel", "id", "android")
@@ -1034,6 +1062,10 @@ class MainActivity : Activity() {
             parentPanel.background = roundedBackground(dialogSurfaceColor(), 14)
             parentPanel.clipToOutline = true
         }
+        val alertTitleId = resources.getIdentifier("alertTitle", "id", "android")
+        dialog.findViewById<TextView>(alertTitleId)?.textSize = scaledSp(20)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.textSize = scaledSp(14)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.textSize = scaledSp(14)
     }
 
     private fun refreshThemeIfNeeded(): Boolean = applyResolvedTheme(ThemeSettings.isDark(this))
@@ -1085,7 +1117,7 @@ class MainActivity : Activity() {
     private fun centerOnLocation() {
         val layer = cameraMapLayer
         if (layer == null) {
-            showMapKeyDialog()
+            Toast.makeText(this, "Яндекс-карта недоступна", Toast.LENGTH_SHORT).show()
             return
         }
         if (!hasCurrentLocation) {
@@ -1206,7 +1238,7 @@ class MainActivity : Activity() {
     private fun text(value: String, sp: Int, color: Int, style: Int): TextView =
         TextView(this).apply {
             text = value
-            textSize = sp.toFloat()
+            textSize = scaledSp(sp)
             setTextColor(color)
             typeface = Typeface.create("sans", style)
         }
@@ -1268,8 +1300,39 @@ class MainActivity : Activity() {
         if (darkTheme) icon.setColorFilter(Color.rgb(235, 235, 235)) else icon.clearColorFilter()
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-    private fun dp(value: Float): Float = value * resources.displayMetrics.density
+    private fun selectedUiScalePercent(): Int =
+        AppSettings.normalizeUiScalePercent(
+            settingsPreferences.getInt(
+                AppSettings.UI_SCALE_PERCENT,
+                AppSettings.DEFAULT_UI_SCALE_PERCENT,
+            ),
+        )
+
+    private fun selectedMapScalePercent(): Int =
+        AppSettings.normalizeMapScalePercent(
+            settingsPreferences.getInt(
+                AppSettings.MAP_SCALE_PERCENT,
+                AppSettings.DEFAULT_MAP_SCALE_PERCENT,
+            ),
+        )
+
+    private fun applyScaleSettingsIfChanged() {
+        val appliedUiScalePercent = (uiScaleFactor * 100f).roundToInt()
+        val appliedMapScalePercent = (mapScaleFactor * 100f).roundToInt()
+        val scaleChanged = selectedUiScalePercent() != appliedUiScalePercent ||
+            selectedMapScalePercent() != appliedMapScalePercent
+        if (!isFinishing && !isDestroyed && scaleChanged) {
+            recreate()
+        }
+    }
+
+    private fun scaledSp(value: Int): Float = value * uiScaleFactor
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density * uiScaleFactor).roundToInt()
+
+    private fun dp(value: Float): Float =
+        value * resources.displayMetrics.density * uiScaleFactor
 
     override fun onRequestPermissionsResult(
         requestCode: Int,

@@ -24,16 +24,13 @@ class CarSetupScreen : Screen {
             if (message.isNotEmpty()) message.append("\n\n")
             if (trackingActive) message.append("Антирадар и звуковые предупреждения работают без карты.\n\n")
             else if (locationGranted) message.append("Антирадар остановлен. Повторно откройте приложение для запуска.\n\n")
-            message.append("Укажите ключ Yandex MapKit здесь или в приложении на телефоне, затем переподключите Android Auto.")
+            message.append("Не удалось инициализировать Yandex MapKit. Полностью перезапустите приложение.")
         }
         if (!surfaceError.isNullOrBlank()) {
             if (message.isNotEmpty()) message.append("\n\n")
             message.append(surfaceError)
         }
         val template = MessageTemplate.Builder(message).setTitle("Настройка GPS AntiRadar").setHeaderAction(Action.BACK)
-        if (!mapKitReady) template.addAction(Action.Builder().setTitle("Ввести ключ MapKit").setOnClickListener {
-            carContext.getCarService(ScreenManager::class.java).push(CarMapKeyScreen(carContext))
-        }.build())
         return template.build()
     }
     fun setTrackingActive(active: Boolean) {

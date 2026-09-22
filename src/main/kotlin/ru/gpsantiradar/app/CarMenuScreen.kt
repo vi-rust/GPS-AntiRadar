@@ -133,7 +133,6 @@ class CarMenuScreen internal constructor(
             )
             CarMenuItem.AUTO_ROTATE_MAP -> Unit
             CarMenuItem.THEME -> screenManager.push(CarThemeScreen(carContext, surfaceController))
-            CarMenuItem.MAPKIT_KEY -> screenManager.push(CarMapKeyScreen(carContext))
             CarMenuItem.ABOUT -> screenManager.push(CarAboutScreen(carContext))
             CarMenuItem.EXIT -> exitAction.exit()
         }
@@ -161,7 +160,6 @@ class CarMenuScreen internal constructor(
             CarMenuItem.ZONE_DISPLAY -> R.drawable.ic_zones
             CarMenuItem.AUTO_ROTATE_MAP -> R.drawable.ic_navigation
             CarMenuItem.THEME -> R.drawable.ic_theme
-            CarMenuItem.MAPKIT_KEY -> R.drawable.ic_key
             CarMenuItem.ABOUT -> R.drawable.ic_info
             CarMenuItem.EXIT -> R.drawable.ic_exit
         }
@@ -176,7 +174,6 @@ class CarMenuScreen internal constructor(
             CarMenuItem.ZONE_DISPLAY -> "Отображение зон"
             CarMenuItem.AUTO_ROTATE_MAP -> "Автоповорот карты"
             CarMenuItem.THEME -> "Тема"
-            CarMenuItem.MAPKIT_KEY -> "Ключ MapKit"
             CarMenuItem.ABOUT -> "О программе"
             CarMenuItem.EXIT -> "Выйти"
         }

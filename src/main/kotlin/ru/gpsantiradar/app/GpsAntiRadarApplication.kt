@@ -25,9 +25,7 @@ class GpsAntiRadarApplication : Application() {
         private var initialized = false
         @Synchronized fun ensureMapKit(context: Context): Boolean {
             if (initialized) return true
-            var key = BuildConfig.MAPKIT_API_KEY?.trim().orEmpty()
-            if (key.isEmpty()) key = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                .getString("yandex_mapkit_key", "")?.trim().orEmpty()
+            val key = BuildConfig.MAPKIT_API_KEY.trim()
             if (key.isEmpty()) return false
             return try {
                 MapKitFactory.setApiKey(key)

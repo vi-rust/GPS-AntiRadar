@@ -25,16 +25,15 @@ import java.lang.reflect.Method
 @RunWith(RobolectricTestRunner::class)
  class AlignmentBehaviorTest {
 @Test
-fun missingMapKitSetupKeepsRadarActiveAndOffersKeyEntry() {
+fun unavailableMapKitKeepsRadarActiveWithoutKeyEntry() {
 val context = ApplicationProvider.getApplicationContext<Context>()
 val template = CarSetupScreen(
 carContext(context), true, false, true, null).onGetTemplate() as MessageTemplate
 
 assertTrue(template!!.getMessage().toString().contains(
 "Антирадар и звуковые предупреждения работают без карты"))
-assertEquals(1, template!!.getActions().size)
-assertEquals("Ввести ключ MapKit",
-template!!.getActions().get(0).getTitle().toString())
+assertTrue(template!!.getMessage().toString().contains("MapKit"))
+assertEquals(0, template!!.getActions().size)
 }
 
 @Test

@@ -4,11 +4,14 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.*
+import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import kotlin.math.*
 
-class CameraDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+class CameraDatabase(context: Context) :
+    SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION),
+    Closeable {
     init { setWriteAheadLoggingEnabled(true) }
 
     override fun onCreate(db: SQLiteDatabase) {
