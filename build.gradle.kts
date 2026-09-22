@@ -6,6 +6,8 @@ plugins {
     id("com.android.application") version "9.0.1"
 }
 
+val appVersionName = "4.9.12"
+
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -24,7 +26,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 47
-        versionName = "4.9.12"
+        versionName = appVersionName
         buildConfigField("String", "MAPKIT_API_KEY", "\"$mapkitApiKey\"")
     }
 
@@ -48,6 +50,15 @@ android {
         getByName("release") {
             signingConfig = signingConfigs.getByName("projectDebug")
             isMinifyEnabled = false
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = false
         }
     }
 
@@ -81,7 +92,7 @@ androidComponents {
 }
 
 base {
-    archivesName = "GPS-AntiRadar"
+    archivesName = "GPS-AntiRadar-$appVersionName"
 }
 
 dependencies {

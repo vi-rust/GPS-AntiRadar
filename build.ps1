@@ -44,8 +44,29 @@ New-Item -ItemType Directory -Force $Output | Out-Null
 & $Gradle --no-daemon clean assembleRelease
 if ($LASTEXITCODE -ne 0) { throw "Android build failed" }
 
-$BuiltApk = Join-Path $Project "build\outputs\apk\release\GPS-AntiRadar-release.apk"
-if (-not (Test-Path $BuiltApk)) { throw "Gradle did not create the expected APK: $BuiltApk" }
-$FinalApk = Join-Path $Output "GPS-AntiRadar.apk"
-Copy-Item $BuiltApk $FinalApk -Force
-Write-Output "Ready: $FinalApk"
+$Abis = @("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+$LegacyApk = Join-Path $Output "GPS-AntiRadar.apk"
+if (Test-Path $LegacyApk) {
+    Remove-Item $LegacyApk -Force
+}
+foreach ($Abi in $Abis) {
+    $UnversionedApk = Join-Path $Output "GPS-AntiRadar-$Abi.apk"
+    if (Test-Path $UnversionedApk) {
+        Remove-Item $UnversionedApk -Force
+    }
+}
+
+foreach ($Abi in $Abis) {
+    $BuiltApks = @(
+        Get-ChildItem (Join-Path $Project "build\outputs\apk\release") `
+            -Filter "GPS-AntiRadar-*-$Abi-release.apk"
+    )
+    if ($BuiltApks.Count -ne 1) {
+        throw "Gradle did not create exactly one versioned APK for ABI $Abi"
+    }
+
+    $FinalName = $BuiltApks[0].Name -replace "-release\.apk$", ".apk"
+    $FinalApk = Join-Path $Output $FinalName
+    Copy-Item $BuiltApks[0].FullName $FinalApk -Force
+    Write-Output "Ready: $FinalApk"
+}
