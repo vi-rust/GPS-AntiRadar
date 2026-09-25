@@ -17,12 +17,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.SystemClock
-import android.speech.tts.TextToSpeech
 import java.util.Locale
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -30,15 +28,11 @@ class TrackingService : Service(), LocationListener {
     private lateinit var locationManager: LocationManager
     private lateinit var database: CameraDatabase
     private lateinit var soundPlayer: StrelkaSoundPlayer
-    private var tts: TextToSpeech? = null
     private var previousGps: Location? = null
     private var lastRadarScan: Location? = null
     private var radarHeading = Float.NaN
     private val alertTracker = StrelkaAlertTracker()
     private val radarScanGate = RadarScanGate()
-    private var alertedCameraId = -1L
-    private var finalWarning = false
-    private var alertedRoadObjectId = -1L
 
     override fun onCreate() {
         super.onCreate()
@@ -87,137 +81,8 @@ class TrackingService : Service(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        if (strelkaAlertsEnabled()) {
-            onStrelkaLocationChanged(location)
-            return
-        }
-        val gpsLocation = LocationManager.GPS_PROVIDER == location.provider
-        if (!gpsLocation && hasRecentGpsFix()) return
-        val speedKmh = speed(location)
-        val heading = heading(location)
-        var nearestCamera: CameraPoint? = null
-        var nearestCameraDistance = Double.MAX_VALUE
-        var nearestRoadObject: CameraPoint? = null
-        var nearestRoadDistance = Double.MAX_VALUE
-        var roadWarningCandidate: CameraPoint? = null
-        var roadWarningDistance = Double.MAX_VALUE
-        var roadWarningProgress = Double.MAX_VALUE
-        val candidates = database.nearby(location.latitude, location.longitude, 5000.0) ?: return
-        for (`object` in candidates) {
-            if (`object`.distanceMeters <= 0) continue
-            val distance = Geo.distanceMeters(
-                location.latitude,
-                location.longitude,
-                `object`.latitude,
-                `object`.longitude,
-            )
-            if (distance > 5000) continue
-            val toObject = Geo.bearing(
-                location.latitude,
-                location.longitude,
-                `object`.latitude,
-                `object`.longitude,
-            )
-            if (speedKmh >= 8 && distance > 60 && Geo.angleDifference(heading, toObject) > 65) continue
-            if (speedKmh >= 8 && distance > 60 && !matchesControlledDirection(`object`, heading)) continue
-            if (`object`.isCameraOrControl()) {
-                if (distance < nearestCameraDistance) {
-                    nearestCamera = `object`
-                    nearestCameraDistance = distance
-                }
-            } else {
-                if (distance < nearestRoadDistance) {
-                    nearestRoadObject = `object`
-                    nearestRoadDistance = distance
-                }
-                val warningDistance = roadAlertDistance(`object`)
-                val progress = distance / warningDistance
-                if (distance <= warningDistance && progress < roadWarningProgress) {
-                    roadWarningCandidate = `object`
-                    roadWarningDistance = distance
-                    roadWarningProgress = progress
-                }
-            }
-        }
-
-        var cameraSpoken = false
-        val camera = nearestCamera
-        if (camera == null) {
-            alertedCameraId = -1
-            finalWarning = false
-        } else {
-            val alertDistance = StrelkaAlertAlgorithm.activationDistance(camera)
-            if (camera.id != alertedCameraId && nearestCameraDistance <= alertDistance) {
-                alertedCameraId = camera.id
-                finalWarning = false
-                speakWarning(camera, nearestCameraDistance, false)
-                cameraSpoken = true
-            } else if (
-                camera.id == alertedCameraId && !finalWarning && nearestCameraDistance <= 300
-            ) {
-                finalWarning = true
-                speakWarning(camera, nearestCameraDistance, true)
-                cameraSpoken = true
-            }
-        }
-
-        val roadCandidate = roadWarningCandidate
-        if (speedKmh >= 3 && roadCandidate != null &&
-            roadCandidate.id != alertedRoadObjectId && !cameraSpoken
-        ) {
-            alertedRoadObjectId = roadCandidate.id
-            speakRoadWarning(roadCandidate, roadWarningDistance)
-        } else if (
-            roadCandidate == null &&
-            (nearestRoadObject == null || nearestRoadDistance > roadAlertDistance(nearestRoadObject!!) + 100)
-        ) {
-            alertedRoadObjectId = -1
-        }
-
-        val nearest: CameraPoint?
-        val nearestDistance: Double
-        if (nearestCameraDistance <= nearestRoadDistance) {
-            nearest = nearestCamera
-            nearestDistance = nearestCameraDistance
-        } else {
-            nearest = nearestRoadObject
-            nearestDistance = nearestRoadDistance
-        }
-
-        val update = Intent(ACTION_UPDATE).setPackage(packageName)
-        update.putExtra(EXTRA_SPEED, speedKmh)
-        update.putExtra(EXTRA_ACCURACY, location.accuracy)
-        update.putExtra(EXTRA_LATITUDE, location.latitude)
-        update.putExtra(EXTRA_LONGITUDE, location.longitude)
-        update.putExtra(EXTRA_HEADING, heading)
-        update.putExtra(EXTRA_DISTANCE, if (nearest == null) -1 else nearestDistance.roundToInt())
-        update.putExtra(EXTRA_CAMERA, nearest?.typeName() ?: "")
-        update.putExtra(EXTRA_CAMERA_ID, nearest?.id ?: -1L)
-        update.putExtra(
-            EXTRA_LIMIT,
-            if (nearest == null || nearest.isRoadObject()) 0 else nearest.currentSpeedLimit(),
-        )
-        update.putExtra(
-            EXTRA_ALERT_DISTANCE,
-            when {
-                nearest == null -> 0
-                nearest.isRoadObject() -> roadAlertDistance(nearest)
-                else -> StrelkaAlertAlgorithm.activationDistance(nearest)
-            },
-        )
-        sendBroadcast(update)
-
-        val line = if (nearest == null) {
-            "${speedKmh.roundToInt()} км/ч"
-        } else {
-            "${nearest.typeName()} · ${formatDistance(nearestDistance)}"
-        }
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(NOTIFICATION_ID, notification(line))
-        if (gpsLocation) previousGps = Location(location)
+        onStrelkaLocationChanged(location)
     }
-
-    private fun strelkaAlertsEnabled(): Boolean = true
 
     private fun onStrelkaLocationChanged(location: Location) {
         val gpsLocation = LocationManager.GPS_PROVIDER == location.provider
@@ -394,13 +259,6 @@ class TrackingService : Service(), LocationListener {
         if (gpsLocation) previousGps = Location(location)
     }
 
-    private fun matchesControlledDirection(camera: CameraPoint, vehicleHeading: Float): Boolean {
-        if (camera.dirType == 0) return true
-        if (Geo.angleDifference(vehicleHeading, camera.direction) <= 70) return true
-        return camera.dirType == 2 &&
-            Geo.angleDifference(vehicleHeading, camera.direction + 180f) <= 70
-    }
-
     private fun runAlertSequence(
         update: StrelkaAlertTracker.Update,
         speedKmh: Float,
@@ -465,35 +323,6 @@ class TrackingService : Service(), LocationListener {
         val previous = previousGps ?: return false
         val ageNanos = SystemClock.elapsedRealtimeNanos() - previous.elapsedRealtimeNanos
         return ageNanos >= 0 && ageNanos < 10_000_000_000L
-    }
-
-    private fun speakWarning(camera: CameraPoint, distance: Double, close: Boolean) {
-        val rounded = if (close) {
-            (max(50.0, distance) / 50).toInt() * 50
-        } else {
-            (max(100.0, distance) / 100).toInt() * 100
-        }
-        val text = StringBuilder(camera.typeName())
-            .append(" через ").append(rounded).append(" метров")
-        val speedLimit = camera.currentSpeedLimit()
-        if (speedLimit > 0) text.append(". Ограничение ").append(speedLimit)
-        if (Build.VERSION.SDK_INT >= 21) {
-            tts!!.speak(text.toString(), TextToSpeech.QUEUE_FLUSH, null, "camera")
-        } else {
-            @Suppress("DEPRECATION")
-            tts!!.speak(text.toString(), TextToSpeech.QUEUE_FLUSH, null)
-        }
-    }
-
-    private fun speakRoadWarning(`object`: CameraPoint, distance: Double) {
-        val rounded = (max(50.0, distance) / 50).toInt() * 50
-        val text = "${`object`.typeName()}. Через $rounded метров"
-        if (Build.VERSION.SDK_INT >= 21) {
-            tts!!.speak(text, TextToSpeech.QUEUE_FLUSH, null, "road-object")
-        } else {
-            @Suppress("DEPRECATION")
-            tts!!.speak(text, TextToSpeech.QUEUE_FLUSH, null)
-        }
     }
 
     private fun formatDistance(meters: Double): String = if (meters >= 1000) {
@@ -599,10 +428,6 @@ class TrackingService : Service(), LocationListener {
         }
         alertTracker.clear()
         soundPlayer.release()
-        tts?.let {
-            it.stop()
-            it.shutdown()
-        }
         database.close()
         super.onDestroy()
     }
@@ -628,11 +453,6 @@ class TrackingService : Service(), LocationListener {
 
         private const val CHANNEL = "tracking"
         private const val NOTIFICATION_ID = 41
-
-        fun roadAlertDistance(`object`: CameraPoint): Int {
-            val distance = if (`object`.distanceMeters > 0) `object`.distanceMeters else 300
-            return max(50, min(1500, distance))
-        }
 
         fun requestStop(context: Context?) {
             context ?: return

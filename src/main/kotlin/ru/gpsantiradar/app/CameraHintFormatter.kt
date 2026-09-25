@@ -1,16 +1,27 @@
 package ru.gpsantiradar.app
 
+import java.util.Locale
+
 /** Shared marker details for the phone and Android Auto map surfaces. */
 object CameraHintFormatter {
     fun format(camera: CameraPoint?): String {
         if (camera == null) return ""
-        val result = StringBuilder(camera.typeName())
         val speedLimit = camera.currentSpeedLimit()
-        if (speedLimit > 0) result.append(" · ").append(speedLimit).append(" км/ч")
-        result.append(if (camera.isCameraOrControl()) "\nЗона контроля: " else "\nОповещение: ")
-            .append(camera.distanceMeters).append(" м")
+        val result = StringBuilder()
+            .append("Тип объекта: ").append(camera.typeName())
+            .append("\nКоординаты: ").append(
+                String.format(Locale.US, "%.6f, %.6f", camera.latitude, camera.longitude),
+            )
             .append("\nНаправленность: ").append(camera.directionName())
+            .append("\nНаправление: ").append(formatDegrees(camera.direction))
+            .append("\nДистанция оповещения: ").append(camera.distanceMeters).append(" м")
+            .append("\nОбратная дистанция: ").append(camera.reverseDistanceMeters).append(" м")
+            .append("\nУгол сектора: ").append(formatDegrees(camera.angleDegrees))
+            .append("\nОграничение скорости: ")
+            .append(if (speedLimit > 0) "$speedLimit км/ч" else "нет")
         if (camera.isCameraOrControl() && camera.dirType == 0) result.append("\nФорма зоны: круг")
         return result.toString()
     }
+
+    private fun formatDegrees(value: Float): String = "${value.toString().removeSuffix(".0")}°"
 }

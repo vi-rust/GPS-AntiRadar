@@ -5,7 +5,7 @@ plugins {
     id("com.android.application") version "9.0.1"
 }
 
-val appVersionName = "4.9.14"
+val appVersionName = "4.9.15"
 
 val mapkitApiKey = "74d6077f-f6ce-4e0e-9fca-a2550f5e4036"
 
@@ -17,7 +17,7 @@ android {
         applicationId = "ru.gpsantiradar.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
+        versionCode = 50
         versionName = appVersionName
         buildConfigField("String", "MAPKIT_API_KEY", "\"$mapkitApiKey\"")
     }

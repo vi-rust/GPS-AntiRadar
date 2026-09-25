@@ -395,6 +395,7 @@ class CarMapPresentation(
             AppSettings.ZONE_TRANSPARENCY,
             AppSettings.ACTIVE_ZONE_TRANSPARENCY,
             AppSettings.ZONE_DISPLAY_MODE,
+            AppSettings.ZONE_OBJECT_SCOPE,
             -> refreshCoverageSettings()
             AppSettings.LOCATION_ARROW_SCALE -> refreshLocationMarkerStyle()
         }

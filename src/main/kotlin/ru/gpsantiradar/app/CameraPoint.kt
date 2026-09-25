@@ -18,6 +18,8 @@ class CameraPoint {
     var newbie: Boolean = false
     /** Compact representation of RadarBase speedControls. */
     var speedRules: String = ""
+    /** True when the object was created locally by the user. */
+    var userDefined: Boolean = false
 
     fun currentSpeedLimit(): Int = SpeedControlRules.currentCarLimit(speedRules, System.currentTimeMillis())
     fun isObservation(): Boolean = type == 15
@@ -27,6 +29,23 @@ class CameraPoint {
     fun isRoadObject(): Boolean = !isCameraOrControl()
     fun hasReverseZone(): Boolean = reverseDistanceMeters > 0 && (dirType == 2 || dirType == 3 || dirType == 4)
     fun typeName(): String = RadarBaseTypes.name(type)
+
+    /** Returns a mutable copy detached from map rendering and database query results. */
+    fun detachedCopy(): CameraPoint = CameraPoint().also { copy ->
+        copy.id = id
+        copy.latitude = latitude
+        copy.longitude = longitude
+        copy.type = type
+        copy.dirType = dirType
+        copy.direction = direction
+        copy.distanceMeters = distanceMeters
+        copy.reverseDistanceMeters = reverseDistanceMeters
+        copy.angleDegrees = angleDegrees
+        copy.rank = rank
+        copy.newbie = newbie
+        copy.speedRules = speedRules
+        copy.userDefined = userDefined
+    }
 
     fun directionName(): String = when (dirType) {
         0 -> "во всех направлениях"

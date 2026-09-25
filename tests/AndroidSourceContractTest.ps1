@@ -45,7 +45,8 @@ $RequiredSources = @(
     "StrelkaAlertTracker", "StrelkaSoundPlayer", "TrackingService", "GpsCarAppService", "GpsCarSession",
     "CarSurfaceController", "CarMapPresentation", "CarMapGestureController",
     "CarMapScreen", "CarMenuScreen", "CarValueScreen",
-    "CarAboutScreen", "ZoneDisplayMode", "CarZoneDisplayScreen", "CarMapCameraState"
+    "CarAboutScreen", "ZoneDisplayMode", "ZoneObjectScope", "CarZoneDisplayScreen", "CarMapCameraState",
+    "UserCameraDefaults"
 )
 foreach ($Name in $RequiredSources) { [void](Read-Source $Name) }
 
@@ -67,6 +68,33 @@ $CarAbout = Read-Source "CarAboutScreen"
 
 Assert-Contains $Database 'setWriteAheadLoggingEnabled\(true\)' "CameraDatabase must enable WAL"
 Assert-Contains $Database 'beginTransactionNonExclusive\(\)' "RadarBase replacement must use a non-exclusive transaction"
+Assert-Contains $Database 'CREATE TABLE IF NOT EXISTS user_objects' "User objects must have persistent local storage"
+Assert-Contains $Database 'fun addUserObject\(' "User objects must be insertable"
+Assert-Contains $Database 'fun updateUserObject\(' "User objects must be editable"
+Assert-Contains $Database 'fun deleteUserObject\(' "User objects must be removable"
+Assert-Contains $Database 'override fun onOpen\(' "User-object schema must self-repair when opened"
+if ($Activity -match '\u041C\u043E\u0438 \u043E\u0431\u044A\u0435\u043A\u0442\u044B') {
+    throw "The removed user-object menu item must not return"
+}
+Assert-Contains $Activity 'RadarBaseTypes\.allTypes\(\)' "User editor must expose every known object type"
+Assert-Contains $Activity '\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C' "User-marker hints must expose editing"
+Assert-Contains $Activity '\u0423\u0434\u0430\u043B\u0438\u0442\u044C' "User-marker hints must expose deletion"
+Assert-Contains $SharedMapLayer 'addInputListener\(' "Phone map must listen for long presses"
+Assert-Contains $SharedMapLayer 'onMapLongTap\(' "Map long presses must reach the host"
+Assert-Contains $SharedMapLayer 'MapObjectDragListener' "User markers must support native dragging"
+Assert-Contains $SharedMapLayer 'marker\.isDraggable = enabled' "Only configured user markers may be dragged"
+Assert-Contains $SharedMapLayer 'onUserCameraMoved\(camera, position\)' "Dropped user markers must be persisted"
+Assert-Contains $Activity 'existing\.detachedCopy\(\)' "Editing must not mutate the rendered camera instance"
+Assert-Contains $Activity 'val directionControl = steppedSeekControl\(' "Direction must be edited with a slider"
+Assert-Contains $Activity 'val speedControl = steppedSeekControl\(' "Speed limit must be edited with a slider"
+Assert-Contains $Activity 'val minusButton = sliderStepButton' "Editor sliders must have decrement buttons"
+Assert-Contains $Activity 'val plusButton = sliderStepButton' "Editor sliders must have increment buttons"
+Assert-Contains $Activity 'private fun sliderWithStepButtons\(' "All phone sliders must share step buttons"
+if ($Activity -match 'controls\.addView\(seekBar') {
+    throw "A phone settings slider is missing decrement and increment buttons"
+}
+Assert-Contains $SharedMapLayer 'Color\.rgb\(0, 150, 255\)' "User markers must use the requested blue outline"
+Assert-Contains $SharedMapLayer 'strokeWidth = dp\(2\.5f\)' "User marker outline must be 2.5dp"
 if ($Database -match '\.beginTransaction\(\)') {
     throw "Exclusive SQLite transactions are forbidden"
 }
@@ -88,6 +116,11 @@ if ($TrackerUpdate -lt 0 -or $GateAccept -lt $TrackerUpdate) {
 }
 Assert-Contains $Tracking 'HeadingSelection\.forStrelka\(' "Tracking must separate visual and alert headings"
 Assert-Contains $Tracking 'headings\.visualHeading' "Map updates must use the immediate visual heading"
+foreach ($LegacyAlertSymbol in @("strelkaAlertsEnabled", "TextToSpeech", "roadAlertDistance", "speakRoadWarning")) {
+    if ($Tracking.Contains($LegacyAlertSymbol)) {
+        throw "Unused legacy alert code remains: $LegacyAlertSymbol"
+    }
+}
 Assert-Contains $Algorithm 'speedKmh > limit \+ AppSettings\.clampOverspeedThreshold\(thresholdKmh\)' "Overspeed threshold must remain strict and non-inclusive"
 Assert-Contains $SoundPlayer 'USAGE_ASSISTANCE_NAVIGATION_GUIDANCE' "Voice alerts must use navigation-guidance audio routing"
 Assert-Contains $SoundPlayer 'add\("cam_stop_voice\.mp3", 1f\)[\s\S]*playNextIfIdle\(\)' "The object-finished phrase must follow the common sound queue rules"
@@ -101,6 +134,7 @@ Assert-Contains $SharedMapLayer 'MapMarkerEntityDiff\.between' "Map markers must
 Assert-Contains $SharedMapLayer 'MapVisualStyle\.coverage\([\s\S]*?camera\.id,[\s\S]*?activeCameraIds' "Coverage style must depend on every confirmed active camera"
 Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.ACTIVE_ONLY' "Coverage must support active-only display"
 Assert-Contains $SharedMapLayer 'ZoneDisplayMode\.NONE' "Coverage must support hiding all zones"
+Assert-Contains $SharedMapLayer 'settings\.objectScope\.includes\(camera\)' "Coverage must support all object types"
 Assert-Contains $SharedMapLayer 'AppSettings\.ZONE_TRANSPARENCY' "Coverage must use shared transparency settings"
 Assert-Contains $SharedMapLayer 'MapVisualStyle\.locationPrimaryColor\(nightMode\)' "Location arrow must follow the map theme"
 Assert-Contains $SharedMapLayer 'AppSettings\.AUTO_ROTATE_MAP' "Map rotation must use the shared setting"
@@ -121,6 +155,7 @@ Assert-Contains $Activity 'applyImmersiveMode\(\)' "Phone must retain immersive 
 Assert-Contains $Activity 'radarBaseUpdater\(\)\.requestUpdate\(\)' "Phone update action must use the application updater"
 Assert-Contains $Activity 'AppSettings\.ZONE_TRANSPARENCY' "Phone menu must expose zone transparency"
 Assert-Contains $Activity 'AppSettings\.ZONE_DISPLAY_MODE' "Phone menu must expose zone visibility"
+Assert-Contains $Activity 'AppSettings\.ZONE_OBJECT_SCOPE' "Phone menu must expose zone object scope"
 Assert-Contains $Activity 'showMenuDialog\(' "Phone settings must be split into thematic submenus"
 Assert-Contains $Activity 'AppSettings\.LOCATION_ARROW_SCALE' "Phone menu must expose location arrow scale"
 Assert-Contains $Activity 'AppSettings\.UI_SCALE_PERCENT' "Interface menu must expose in-app UI scale"
@@ -202,8 +237,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*49' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.14"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*50' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.15"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

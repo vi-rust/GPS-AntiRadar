@@ -24,9 +24,17 @@ class CarZoneDisplayScreen : Screen {
         val items = ItemList.Builder()
         ZoneDisplayMode.entries.forEach { mode ->
             val row = Row.Builder()
-                .setTitle(mode.title())
-                .setOnClickListener { select(mode) }
+                .setTitle("Режим: ${mode.title()}")
+                .setOnClickListener { selectMode(mode) }
             if (mode == selected) row.addText("Выбрано")
+            items.addItem(row.build())
+        }
+        val selectedScope = currentScope()
+        ZoneObjectScope.entries.forEach { scope ->
+            val row = Row.Builder()
+                .setTitle("Типы: ${scope.title()}")
+                .setOnClickListener { selectScope(scope) }
+            if (scope == selectedScope) row.addText("Выбрано")
             items.addItem(row.build())
         }
         return ListTemplate.Builder()
@@ -41,10 +49,24 @@ class CarZoneDisplayScreen : Screen {
             .getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
     )
 
-    private fun select(mode: ZoneDisplayMode) {
+    private fun currentScope(): ZoneObjectScope = ZoneObjectScope.fromStored(
+        carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+            .getString(AppSettings.ZONE_OBJECT_SCOPE, ZoneObjectScope.CAMERAS_ONLY.name),
+    )
+
+    private fun selectMode(mode: ZoneDisplayMode) {
         carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
             .edit()
             .putString(AppSettings.ZONE_DISPLAY_MODE, mode.name)
+            .commit()
+        settingChanged.run()
+        invalidate()
+    }
+
+    private fun selectScope(scope: ZoneObjectScope) {
+        carContext.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(AppSettings.ZONE_OBJECT_SCOPE, scope.name)
             .commit()
         settingChanged.run()
         invalidate()

@@ -217,6 +217,10 @@ check(ZoneDisplayMode.fromStored(null) == ZoneDisplayMode.ALL
 && ZoneDisplayMode.fromStored("ACTIVE_ONLY") == ZoneDisplayMode.ACTIVE_ONLY
 && ZoneDisplayMode.fromStored("invalid") == ZoneDisplayMode.ALL,
 "zone display mode defaults safely to all zones")
+check(ZoneObjectScope.fromStored(null) == ZoneObjectScope.CAMERAS_ONLY
+&& ZoneObjectScope.fromStored("ALL_OBJECTS") == ZoneObjectScope.ALL_OBJECTS
+&& ZoneObjectScope.fromStored("invalid") == ZoneObjectScope.CAMERAS_ONLY,
+"zone object scope defaults safely to cameras only")
 if (args!!.size > 0)
 {
 val count = intArrayOf(0)
@@ -306,12 +310,21 @@ private fun verifyCameraHintFormatter() {
 val camera = CameraPoint()
 camera.type = 1
 camera.dirType = 1
+camera.latitude = 54.609042
+camera.longitude = 56.151002
+camera.direction = 92f
 camera.distanceMeters = 650
+camera.reverseDistanceMeters = 250
+camera.angleDegrees = 35f
 camera.speedRules = SpeedControlRules.encode(
 80, false, -1, -1, 0, 0, SpeedControlRules.CAR)
 val hint = CameraHintFormatter.format(camera)
 check((hint!!.contains(camera.typeName()) && hint!!.contains("80 км/ч")
-&& hint!!.contains("Зона контроля: 650 м")
+&& hint!!.contains("54.609042, 56.151002")
+&& hint!!.contains("Направление: 92°")
+&& hint!!.contains("Дистанция оповещения: 650 м")
+&& hint!!.contains("Обратная дистанция: 250 м")
+&& hint!!.contains("Угол сектора: 35°")
 && hint!!.contains(camera.directionName())),
 "phone and car camera hints share all control details")
 }
@@ -627,9 +640,9 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 18, "about dialog contains every known release")
+check(releases!!.size == 19, "about dialog contains every known release")
 check(releases!!.map { it.version } == listOf(
-"4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
+"4.9.15", "4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
 "4.9.6", "4.9.5", "4.9.4", "4.9.3", "4.9.2", "4.9.1", "4.9.0",
 "4.8.1", "4.8.0", "4.7.1"),
 "release history is newest first")
@@ -638,18 +651,18 @@ for (release in releases!!)
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.14")
+val current = ReleaseHistory.find("4.9.15")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("масштаба интерфейса")
-&& current!!.changes.contains("слайдер")
-&& current!!.changes.contains("100%")),
-"current release describes slider-based in-app scaling")
-val previous = ReleaseHistory.find("4.9.13")
-check((previous != null && previous!!.changes.contains("звуковых оповещений")
-&& previous!!.changes.contains("MapKit")
-&& previous!!.changes.contains("встроен")),
-"previous release keeps its audio-tail and embedded MapKit key description")
+check((current!!.changes.contains("пользовательские объекты")
+&& current!!.changes.contains("долгим нажатием")
+&& current!!.changes.contains("RadarBase")),
+"current release describes user-defined objects")
+val previous = ReleaseHistory.find("4.9.14")
+check((previous != null && previous!!.changes.contains("масштаба интерфейса")
+&& previous!!.changes.contains("слайдер")
+&& previous!!.changes.contains("100%")),
+"previous release keeps its slider-based scaling description")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

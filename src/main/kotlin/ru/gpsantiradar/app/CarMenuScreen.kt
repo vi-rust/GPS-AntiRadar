@@ -81,7 +81,15 @@ class CarMenuScreen internal constructor(
                             AppSettings.PREFERENCES,
                             Context.MODE_PRIVATE,
                         ).getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name)
-                        "Отображение зон: ${ZoneDisplayMode.fromStored(stored).title()}"
+                        val storedScope = carContext.getSharedPreferences(
+                            AppSettings.PREFERENCES,
+                            Context.MODE_PRIVATE,
+                        ).getString(
+                            AppSettings.ZONE_OBJECT_SCOPE,
+                            ZoneObjectScope.CAMERAS_ONLY.name,
+                        )
+                        "Отображение зон: ${ZoneDisplayMode.fromStored(stored).title()} · " +
+                            ZoneObjectScope.fromStored(storedScope).title()
                     }
                     else -> title(item)
                 },

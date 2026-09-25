@@ -60,12 +60,12 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.14", BuildConfig.VERSION_NAME)
+assertEquals("4.9.15", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("масштаба интерфейса"))
-assertTrue(release!!.changes.contains("слайдер"))
-assertTrue(release!!.changes.contains("100%"))
+assertTrue(release!!.changes.contains("пользовательские объекты"))
+assertTrue(release!!.changes.contains("долгим нажатием"))
+assertTrue(release!!.changes.contains("RadarBase"))
 }
 
 @Test @Throws(Exception::class)
@@ -198,6 +198,7 @@ var dialog = ShadowAlertDialog.getLatestAlertDialog()
 assertTrue(dialog != null && dialog!!.isShowing())
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Оповещения") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Карта") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Мои объекты") == null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Интерфейс") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Приложение") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Выйти") != null)
@@ -216,7 +217,8 @@ dialog = ShadowAlertDialog.getLatestAlertDialog()
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Размер стрелки: 1,0") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность зон: 85%") != null)
 assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Прозрачность активной зоны: 70%") != null)
-assertTrue(findText(dialog!!.getWindow()!!.getDecorView(), "Отображение зон: Все") != null)
+assertTrue(findText(dialog!!.getWindow()!!.getDecorView(),
+"Отображение зон: Все · Только камеры") != null)
 assertNull(findTextStartingWith(dialog!!.getWindow()!!.getDecorView(),
 "Расстояние оповещения"))
 dialog!!.dismiss()
@@ -439,7 +441,8 @@ screenManager!!.reset()
 click(rootItems!!.get(1) as Row)
 val map = screenManager!!.getScreensPushed().get(0) as CarMenuScreen
 val mapItems = (map!!.onGetTemplate() as ListTemplate).getSingleList()!!.getItems()
-assertEquals(Arrays.asList("Размер стрелки", "Автоповорот карты", "Отображение зон: Все",
+assertEquals(Arrays.asList("Размер стрелки", "Автоповорот карты",
+"Отображение зон: Все · Только камеры",
 "Прозрачность зон", "Прозрачность активной зоны"), rowTitles(mapItems!!))
 screenManager!!.reset()
 click(mapItems!!.get(0) as Row)
@@ -492,9 +495,12 @@ val screen = CarZoneDisplayScreen(carContext, { refreshes!![0]++ })
 
 val initialItems = (screen.onGetTemplate() as ListTemplate)
 .getSingleList()!!.getItems()
-assertEquals(Arrays.asList("Все", "Только активная", "Не показывать"),
+assertEquals(Arrays.asList("Режим: Все", "Режим: Только активная", "Режим: Не показывать",
+"Типы: Только камеры", "Типы: Все типы объектов"),
 rowTitles(initialItems!!))
 assertTrue((initialItems!!.get(0) as Row).getTexts().get(0).toString()
+.contains("Выбрано"))
+assertTrue((initialItems!!.get(3) as Row).getTexts().get(0).toString()
 .contains("Выбрано"))
 
 click(initialItems!!.get(1) as Row)
@@ -502,7 +508,11 @@ click(initialItems!!.get(1) as Row)
 assertEquals("ACTIVE_ONLY", carContext!!.getSharedPreferences(
 AppSettings.PREFERENCES, Context.MODE_PRIVATE).getString(
 AppSettings.ZONE_DISPLAY_MODE, ""))
-assertEquals(1, refreshes!![0])
+click(initialItems!!.get(4) as Row)
+assertEquals("ALL_OBJECTS", carContext!!.getSharedPreferences(
+AppSettings.PREFERENCES, Context.MODE_PRIVATE).getString(
+AppSettings.ZONE_OBJECT_SCOPE, ""))
+assertEquals(2, refreshes!![0])
 }
 
 @Test

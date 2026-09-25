@@ -12,6 +12,7 @@ object AppSettings {
     const val ZONE_TRANSPARENCY = "zone_transparency"
     const val ACTIVE_ZONE_TRANSPARENCY = "active_zone_transparency"
     const val ZONE_DISPLAY_MODE = "zone_display_mode"
+    const val ZONE_OBJECT_SCOPE = "zone_object_scope"
     const val AUTO_ROTATE_MAP = "auto_rotate_map"
     const val LOCATION_ARROW_SCALE = "location_arrow_scale_tenths"
     const val UI_SCALE_PERCENT = "ui_scale_percent"

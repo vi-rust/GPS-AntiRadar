@@ -2,7 +2,14 @@ package ru.gpsantiradar.app
 
 /** RadarBase object categories and user-facing names. */
 object RadarBaseTypes {
+    private val allTypes = intArrayOf(
+        0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        41, 42, 43, 61, 62, 63, 64, 65, 100, 103, 104, 105, 106, 107, 108,
+        171, 172, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712,
+        713, 714,
+    )
     private val cameraTypes = setOf(0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 41, 42, 43, 100, 103, 104, 105, 106, 107, 108, 171, 172)
+    fun allTypes(): IntArray = allTypes.copyOf()
     fun isCameraOrControl(type: Int) = type in cameraTypes
     fun name(type: Int): String = when (type) {
         0 -> "Неизвестная опасность"; 1 -> "Стационарная камера"; 2 -> "Пост ДПС"

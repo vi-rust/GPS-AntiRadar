@@ -18,7 +18,9 @@ import com.yandex.mapkit.map.CameraListener
 import com.yandex.mapkit.map.CameraPosition
 import com.yandex.mapkit.map.CameraUpdateReason
 import com.yandex.mapkit.map.IconStyle
+import com.yandex.mapkit.map.InputListener
 import com.yandex.mapkit.map.MapObject
+import com.yandex.mapkit.map.MapObjectDragListener
 import com.yandex.mapkit.map.MapObjectCollection
 import com.yandex.mapkit.map.MapObjectTapListener
 import com.yandex.mapkit.map.MapWindow
@@ -41,6 +43,9 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         fun postToUi(action: Runnable)
         fun onMarkerPresentationChanged()
         fun onCameraTapped(camera: CameraPoint, position: Point)
+        fun onMapLongPressed(position: Point) {}
+        fun userCameraDraggingEnabled(): Boolean = false
+        fun onUserCameraMoved(camera: CameraPoint, position: Point) {}
     }
 
     private var queryContext: Context?
@@ -62,6 +67,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     private var lastSpeedKmh = 0f
     private var activeCameraIds: Set<Long> = emptySet()
     private var appliedCoverageSettings: CoverageSettings? = null
+    private var draggingUserCamera = false
 
     @Volatile
     private var initialLoadGeneration = 0
@@ -72,7 +78,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     @Volatile
     private var destroyed = false
 
-    private val markerIcons = HashMap<Int, ImageProvider>()
+    private val markerIcons = HashMap<String, ImageProvider>()
     private val markerResources = HashMap<Int, Int>()
     private val clusterIcons = HashMap<Int, ImageProvider>()
     private val renderedCameras = HashMap<Long, CameraPoint>()
@@ -93,6 +99,31 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         }
     }
     private val placemarkTapListenerReference = WeakReference(placemarkTapListener)
+    private val placemarkDragListener = object : MapObjectDragListener {
+        override fun onMapObjectDragStart(mapObject: MapObject) {
+            val camera = mapObject.userData as? CameraPoint
+            if (!destroyed && camera?.userDefined == true && mapObject is PlacemarkMapObject) {
+                draggingUserCamera = true
+                pauseFollowing()
+            }
+        }
+
+        override fun onMapObjectDrag(mapObject: MapObject, point: Point) {
+            if (draggingUserCamera && mapObject is PlacemarkMapObject) {
+                mapObject.geometry = point
+            }
+        }
+
+        override fun onMapObjectDragEnd(mapObject: MapObject) {
+            val camera = mapObject.userData as? CameraPoint
+            val position = (mapObject as? PlacemarkMapObject)?.geometry
+            draggingUserCamera = false
+            if (!destroyed && camera?.userDefined == true && position != null) {
+                host?.onUserCameraMoved(camera, position)
+            }
+        }
+    }
+    private val placemarkDragListenerReference = WeakReference<MapObjectDragListener>(placemarkDragListener)
 
     private val cameraListener = CameraListener {
             _: com.yandex.mapkit.map.Map,
@@ -104,6 +135,16 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (finished) refreshVisible()
     }
     private val cameraListenerReference = WeakReference(cameraListener)
+    private val inputListener = object : InputListener {
+        override fun onMapTap(map: com.yandex.mapkit.map.Map, point: Point) = Unit
+
+        override fun onMapLongTap(map: com.yandex.mapkit.map.Map, point: Point) {
+            if (!destroyed && !draggingUserCamera && !isDraggableUserCameraAt(point)) {
+                host?.onMapLongPressed(point)
+            }
+        }
+    }
+    private val inputListenerReference = WeakReference<InputListener>(inputListener)
 
     init {
         val checkedContext = requireNotNull(context) { "context is required" }
@@ -119,6 +160,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         cameraMarkerCollection = activeMap.mapObjects.addCollection()
         locationCollection = activeMap.mapObjects.addCollection()
         activeMap.addCameraListener(cameraListenerReference)
+        activeMap.addInputListener(inputListenerReference)
     }
 
     fun loadInitial(moveToData: Boolean) {
@@ -348,6 +390,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (activeMap != null) {
             try {
                 activeMap.removeCameraListener(cameraListenerReference)
+                activeMap.removeInputListener(inputListenerReference)
                 removeOwnedCollection(cameraMarkerCollection)
                 removeOwnedCollection(cameraCoverageCollection)
                 removeOwnedCollection(locationCollection)
@@ -443,6 +486,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (camera.isCameraOrControl()) marker.direction = shootingBearing(camera)
         marker.userData = camera
         marker.addTapListener(placemarkTapListenerReference)
+        configureUserCameraDragging(marker, camera)
         return marker
     }
 
@@ -465,11 +509,37 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
 
         val oldCamera = checkNotNull(previous.camera)
         val newCamera = checkNotNull(current.camera)
-        if (oldCamera.type != newCamera.type) marker.setIcon(iconForCamera(newCamera))
+        if (oldCamera.type != newCamera.type || oldCamera.userDefined != newCamera.userDefined) {
+            marker.setIcon(iconForCamera(newCamera))
+        }
         val oldDirection = if (oldCamera.isCameraOrControl()) shootingBearing(oldCamera) else 0f
         val newDirection = if (newCamera.isCameraOrControl()) shootingBearing(newCamera) else 0f
         if (oldDirection.compareTo(newDirection) != 0) marker.direction = newDirection
         marker.userData = newCamera
+        configureUserCameraDragging(marker, newCamera)
+    }
+
+    private fun configureUserCameraDragging(marker: PlacemarkMapObject, camera: CameraPoint) {
+        val enabled = camera.userDefined && host?.userCameraDraggingEnabled() == true
+        marker.isDraggable = enabled
+        if (enabled) marker.setDragListener(placemarkDragListenerReference)
+    }
+
+    private fun isDraggableUserCameraAt(point: Point): Boolean {
+        if (host?.userCameraDraggingEnabled() != true) return false
+        val activeWindow = mapWindow ?: return false
+        val pressed = activeWindow.worldToScreen(point) ?: return false
+        val radius = dp(32f)
+        val radiusSquared = radius * radius
+        return renderedMarkerEntities.values.any { entity ->
+            val camera = entity.camera
+            if (entity.cluster || camera?.userDefined != true) return@any false
+            val marker = activeWindow.worldToScreen(Point(entity.latitude, entity.longitude))
+                ?: return@any false
+            val dx = marker.x - pressed.x
+            val dy = marker.y - pressed.y
+            dx * dx + dy * dy <= radiusSquared
+        }
     }
 
     private fun individualMarkerStyle(): IconStyle = IconStyle()
@@ -500,7 +570,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         settings: CoverageSettings = coverageSettings(),
     ): List<PolygonMapObject> {
         val result = ArrayList<PolygonMapObject>()
-        if (!camera.isCameraOrControl()) return result
+        if (!settings.objectScope.includes(camera)) return result
         val baseColor = markerColor(if (camera.isObservation()) OBSERVATION_MARKER else camera.type)
         val colors = MapVisualStyle.coverage(
             baseColor,
@@ -661,8 +731,9 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
 
     private fun iconForCamera(camera: CameraPoint): ImageProvider {
         val resourceId = cameraIconResource(camera.type)
-        return markerIcons.getOrPut(resourceId) {
-            ImageProvider.fromBitmap(createCameraBitmap(resourceId))
+        val key = "$resourceId:${camera.userDefined}"
+        return markerIcons.getOrPut(key) {
+            ImageProvider.fromBitmap(createCameraBitmap(resourceId, camera.userDefined))
         }
     }
 
@@ -672,15 +743,33 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         if (found == 0) R.drawable.cam_type_0 else found
     }
 
-    private fun createCameraBitmap(resourceId: Int): Bitmap {
-        val size = dp(42)
+    private fun createCameraBitmap(resourceId: Int, userDefined: Boolean): Bitmap {
+        val size = dp(if (userDefined) 48 else 42)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        val padding = if (userDefined) dp(4) else 0
+        if (userDefined) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = USER_MARKER_OUTLINE
+                style = Paint.Style.STROKE
+                strokeWidth = dp(2.5f)
+            }
+            val halfStroke = paint.strokeWidth / 2f
+            canvas.drawRoundRect(
+                halfStroke,
+                halfStroke,
+                size - halfStroke,
+                size - halfStroke,
+                dp(8f),
+                dp(8f),
+                paint,
+            )
+        }
         val context = checkNotNull(resourceContext)
         var drawable: Drawable? = context.getDrawable(resourceId)
         if (drawable == null) drawable = context.getDrawable(R.drawable.cam_type_0)
         drawable?.let {
-            it.setBounds(0, 0, size, size)
+            it.setBounds(padding, padding, size - padding, size - padding)
             it.draw(canvas)
         }
         return bitmap
@@ -824,6 +913,12 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
             ZoneDisplayMode.fromStored(
                 preferences?.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
             ),
+            ZoneObjectScope.fromStored(
+                preferences?.getString(
+                    AppSettings.ZONE_OBJECT_SCOPE,
+                    ZoneObjectScope.CAMERAS_ONLY.name,
+                ),
+            ),
             AppSettings.clampZoneTransparency(
                 preferences?.getInt(
                     AppSettings.ZONE_TRANSPARENCY,
@@ -852,10 +947,12 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         private const val COVERAGE_MIN_ZOOM = 13f
         private const val FOLLOW_PAUSE_MS = 7000L
         private val GREEN = Color.rgb(0, 166, 82)
+        private val USER_MARKER_OUTLINE = Color.rgb(0, 150, 255)
     }
 
     private data class CoverageSettings(
         val displayMode: ZoneDisplayMode,
+        val objectScope: ZoneObjectScope,
         val zoneTransparencyPercent: Int,
         val activeZoneTransparencyPercent: Int,
     )

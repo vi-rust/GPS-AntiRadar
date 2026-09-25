@@ -23,12 +23,17 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.ArrayAdapter
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -38,6 +43,7 @@ import com.yandex.mapkit.mapview.MapView
 import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -91,6 +97,7 @@ class MainActivity : Activity() {
             AppSettings.ZONE_TRANSPARENCY,
             AppSettings.ACTIVE_ZONE_TRANSPARENCY,
             AppSettings.ZONE_DISPLAY_MODE,
+            AppSettings.ZONE_OBJECT_SCOPE,
             -> cameraMapLayer?.refreshCoverageSettings()
             AppSettings.LOCATION_ARROW_SCALE -> cameraMapLayer?.refreshLocationMarkerStyle()
         }
@@ -244,11 +251,25 @@ class MainActivity : Activity() {
                         }
 
                         override fun onCameraTapped(camera: CameraPoint, position: Point) {
+                            if (camera.userDefined) {
+                                showUserCameraHintDialog(camera)
+                                return
+                            }
                             showCameraHint(camera, position)
                             val generation = ++hintGeneration
                             window.decorView.postDelayed({
                                 if (generation == hintGeneration) hideCameraHintSmoothly(generation)
                             }, 3000L)
+                        }
+
+                        override fun onMapLongPressed(position: Point) {
+                            showQuickAddUserObjectDialog(position)
+                        }
+
+                        override fun userCameraDraggingEnabled(): Boolean = true
+
+                        override fun onUserCameraMoved(camera: CameraPoint, position: Point) {
+                            saveMovedUserObject(camera, position)
                         }
                     },
                 )
@@ -429,6 +450,292 @@ class MainActivity : Activity() {
         exit.setOnClickListener { exitApplication(); dialog.dismiss() }
     }
 
+    private fun showQuickAddUserObjectDialog(position: Point) {
+        val objectTypes = RadarBaseTypes.allTypes()
+        val titles = objectTypes.map(RadarBaseTypes::name).toTypedArray()
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setTitle("Тип нового объекта")
+            .setItems(titles) { _, index -> addUserObjectAt(position, objectTypes[index]) }
+            .setNegativeButton("Отмена", null)
+            .create()
+        dialog.show()
+        styleRoundedDialog(dialog)
+    }
+
+    private fun addUserObjectAt(position: Point, type: Int) {
+        val point = UserCameraDefaults.create(
+            position.latitude,
+            position.longitude,
+            type,
+            latestSnapshot.headingDegrees,
+        )
+        Thread({
+            val saved = runCatching {
+                CameraDatabase(this@MainActivity).use { it.addUserObject(point) }
+            }.isSuccess
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (saved) refreshAfterUserObjectChange()
+                Toast.makeText(
+                    this,
+                    if (saved) "Объект добавлен" else "Не удалось сохранить объект",
+                    if (saved) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+                ).show()
+            }
+        }, "user-object-add").start()
+    }
+
+    private fun showUserCameraHintDialog(camera: CameraPoint) {
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setMessage(CameraHintFormatter.format(camera))
+            .setPositiveButton("Редактировать") { _, _ -> showUserObjectEditor(camera) }
+            .setNeutralButton("Удалить") { _, _ -> confirmDeleteUserObject(camera) }
+            .setNegativeButton("Закрыть", null)
+            .create()
+        dialog.show()
+        styleRoundedDialog(dialog)
+    }
+
+    private fun showUserObjectEditor(existing: CameraPoint) {
+        val objectTypes = RadarBaseTypes.allTypes()
+        val directionTypes = intArrayOf(0, 1, 2, 3, 4)
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        form.addView(
+            text(
+                "Координаты: ${String.format(Locale.US, "%.6f, %.6f", existing.latitude, existing.longitude)}",
+                14,
+                secondaryTextColor(),
+                Typeface.NORMAL,
+            ),
+        )
+        form.addView(text("Тип объекта", 14, primaryTextColor(), Typeface.BOLD).apply {
+            setPadding(0, dp(14), 0, dp(4))
+        })
+        val typeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                objectTypes.map(RadarBaseTypes::name),
+            )
+            setSelection(max(0, objectTypes.indexOf(existing.type)))
+        }
+        form.addView(typeSpinner, LinearLayout.LayoutParams(-1, dp(48)))
+        form.addView(text("Направление контроля", 14, primaryTextColor(), Typeface.BOLD).apply {
+            setPadding(0, dp(10), 0, dp(4))
+        })
+        val directionSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf(
+                    "Все направления",
+                    "Навстречу потоку",
+                    "Два встречных направления",
+                    "В спину потоку",
+                    "В лицо и в спину потоку",
+                ),
+            )
+            setSelection(max(0, directionTypes.indexOf(existing.dirType)))
+        }
+        form.addView(directionSpinner, LinearLayout.LayoutParams(-1, dp(48)))
+        val directionControl = steppedSeekControl(
+            "Направление", 0, 359, 1, existing.direction.roundToInt(),
+        ) { "$it°" }
+        form.addView(directionControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+        val distanceControl = steppedSeekControl(
+            "Дистанция зоны", 50, 1500, 50, existing.distanceMeters,
+        )
+        form.addView(distanceControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+        val reverseDistanceControl = steppedSeekControl(
+            "Обратная дистанция", 0, 1500, 50, existing.reverseDistanceMeters,
+        )
+        form.addView(reverseDistanceControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+        val angleControl = steppedSeekControl(
+            "Угол сектора", 0, 180, 5, existing.angleDegrees.roundToInt(),
+        )
+        form.addView(angleControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+        val speedControl = steppedSeekControl(
+            "Ограничение скорости", 0, 300, 1, existing.currentSpeedLimit(),
+        ) { if (it == 0) "нет" else "$it км/ч" }
+        form.addView(speedControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+
+        val scroll = ScrollView(this).apply { addView(form, FrameLayout.LayoutParams(-1, -2)) }
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setTitle("Редактировать объект")
+            .setView(scroll)
+            .setPositiveButton("Сохранить", null)
+            .setNegativeButton("Отмена", null)
+            .create()
+        dialog.setOnShowListener {
+            styleRoundedDialog(dialog)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { saveButton ->
+                val direction = directionControl.second.progress
+                val speed = speedControl.second.progress
+                saveButton.isEnabled = false
+                val dirType = directionTypes[directionSpinner.selectedItemPosition]
+                val point = existing.detachedCopy().apply {
+                    type = objectTypes[typeSpinner.selectedItemPosition]
+                    this.dirType = dirType
+                    this.direction = direction.toFloat()
+                    distanceMeters = 50 + distanceControl.second.progress * 50
+                    reverseDistanceMeters = reverseDistanceControl.second.progress * 50
+                    angleDegrees = (angleControl.second.progress * 5).toFloat()
+                    speedRules = if (speed > 0) {
+                        SpeedControlRules.encode(speed, false, -1, -1, 0, 0, SpeedControlRules.CAR)
+                    } else {
+                        ""
+                    }
+                }
+                Thread({
+                    val saved = runCatching {
+                        CameraDatabase(this@MainActivity).use { it.updateUserObject(point) }
+                    }.getOrDefault(false)
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (saved) {
+                            dialog.dismiss()
+                            refreshAfterUserObjectChange()
+                            Toast.makeText(
+                                this,
+                                "Изменения сохранены",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            saveButton.isEnabled = true
+                            Toast.makeText(this, "Не удалось сохранить объект", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }, "user-object-update").start()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun saveMovedUserObject(camera: CameraPoint, position: Point) {
+        val moved = camera.detachedCopy().apply {
+            latitude = position.latitude
+            longitude = position.longitude
+        }
+        Thread({
+            val saved = runCatching {
+                CameraDatabase(this@MainActivity).use { it.updateUserObject(moved) }
+            }.getOrDefault(false)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refreshAfterUserObjectChange()
+                Toast.makeText(
+                    this,
+                    if (saved) "Новое положение сохранено" else "Не удалось переместить объект",
+                    if (saved) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+                ).show()
+            }
+        }, "user-object-move").start()
+    }
+
+    private fun steppedSeekControl(
+        label: String,
+        minimum: Int,
+        maximum: Int,
+        step: Int,
+        initial: Int,
+        formatValue: (Int) -> String = { it.toString() },
+    ): Pair<LinearLayout, SeekBar> {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, 0)
+        }
+        val valueLabel = text("", 14, primaryTextColor(), Typeface.NORMAL)
+        val seekBar = SeekBar(this).apply {
+            max = (maximum - minimum) / step
+            progress = ((initial.coerceIn(minimum, maximum) - minimum) / step)
+        }
+        fun updateLabel() {
+            valueLabel.text = "$label: ${formatValue(minimum + seekBar.progress * step)}"
+        }
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) = updateLabel()
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+        })
+        updateLabel()
+        row.addView(valueLabel, LinearLayout.LayoutParams(-1, -2))
+        row.addView(sliderWithStepButtons(seekBar, label), LinearLayout.LayoutParams(-1, dp(48)))
+        return row to seekBar
+    }
+
+    private fun sliderWithStepButtons(
+        seekBar: SeekBar,
+        label: String,
+        afterStep: (SeekBar) -> Unit = {},
+    ): LinearLayout {
+        fun step(delta: Int) {
+            val previous = seekBar.progress
+            seekBar.progress = (previous + delta).coerceIn(0, seekBar.max)
+            if (seekBar.progress != previous) afterStep(seekBar)
+        }
+        val minusButton = sliderStepButton("−", "Уменьшить: $label") { step(-1) }
+        val plusButton = sliderStepButton("+", "Увеличить: $label") { step(1) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(minusButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+            addView(seekBar, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(plusButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        }
+    }
+
+    private fun sliderStepButton(
+        caption: String,
+        description: String,
+        action: () -> Unit,
+    ): Button = Button(this).apply {
+        text = caption
+        contentDescription = description
+        textSize = 22f
+        setTextColor(primaryTextColor())
+        background = roundedBackground(inputSurfaceColor(), 8)
+        minWidth = 0
+        minimumWidth = 0
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(0, 0, 0, 0)
+        setOnClickListener { action() }
+    }
+
+    private fun confirmDeleteUserObject(point: CameraPoint) {
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setTitle("Удалить объект?")
+            .setMessage(point.typeName())
+            .setPositiveButton("Удалить") { _, _ ->
+                Thread({
+                    val deleted = runCatching {
+                        CameraDatabase(this@MainActivity).use { it.deleteUserObject(point.id) }
+                    }.getOrDefault(false)
+                    runOnUiThread {
+                        if (deleted) refreshAfterUserObjectChange()
+                        Toast.makeText(
+                            this,
+                            if (deleted) "Объект удалён" else "Не удалось удалить объект",
+                            if (deleted) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }, "user-object-delete").start()
+            }
+            .setNegativeButton("Отмена", null)
+            .create()
+        dialog.show()
+        styleRoundedDialog(dialog)
+    }
+
+    private fun refreshAfterUserObjectChange() {
+        refreshDatabaseCount()
+        refreshAboutDatabaseInfo()
+        cameraMapLayer?.refreshVisible()
+    }
+
     private fun showAlertsMenu() {
         val content = menuContent()
         content.addView(overspeedThresholdRow(), LinearLayout.LayoutParams(-1, dp(86)))
@@ -443,9 +750,15 @@ class MainActivity : Activity() {
         val zoneDisplayMode = ZoneDisplayMode.fromStored(
             settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
         )
+        val zoneObjectScope = ZoneObjectScope.fromStored(
+            settingsPreferences.getString(
+                AppSettings.ZONE_OBJECT_SCOPE,
+                ZoneObjectScope.CAMERAS_ONLY.name,
+            ),
+        )
         val zoneDisplay = menuAction(
             R.drawable.ic_zones,
-            "Отображение зон: ${zoneDisplayMode.title()}",
+            "Отображение зон: ${zoneDisplayMode.title()} · ${zoneObjectScope.title()}",
         )
         content.addView(zoneDisplay, LinearLayout.LayoutParams(-1, dp(54)))
         content.addView(
@@ -561,7 +874,13 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, "Предел превышения скорости") { stepped ->
+                val value = AppSettings.clampOverspeedThreshold(stepped.progress)
+                settingsPreferences.edit().putInt(AppSettings.OVERSPEED_THRESHOLD, value).apply()
+            },
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
@@ -598,7 +917,16 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, "Размер стрелки") { stepped ->
+                val value = AppSettings.clampLocationArrowScale(
+                    AppSettings.MIN_LOCATION_ARROW_SCALE_TENTHS +
+                        stepped.progress * AppSettings.LOCATION_ARROW_SCALE_STEP_TENTHS,
+                )
+                settingsPreferences.edit().putInt(AppSettings.LOCATION_ARROW_SCALE, value).apply()
+            },
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
@@ -634,7 +962,10 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, "Прозрачность HUD"),
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
@@ -737,25 +1068,80 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, label) { stepped ->
+                val value = AppSettings.clampZoneTransparency(
+                    AppSettings.MIN_ZONE_TRANSPARENCY_PERCENT +
+                        stepped.progress * AppSettings.ZONE_TRANSPARENCY_STEP_PERCENT,
+                )
+                settingsPreferences.edit().putInt(preferenceKey, value).apply()
+            },
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
     private fun showZoneDisplayDialog() {
-        val current = ZoneDisplayMode.fromStored(
+        val currentMode = ZoneDisplayMode.fromStored(
             settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
         )
-        val modes = ZoneDisplayMode.entries.toTypedArray()
-        val titles = Array(modes.size) { modes[it].title() }
+        val currentScope = ZoneObjectScope.fromStored(
+            settingsPreferences.getString(
+                AppSettings.ZONE_OBJECT_SCOPE,
+                ZoneObjectScope.CAMERAS_ONLY.name,
+            ),
+        )
+        val content = menuContent()
+        content.addView(text("Режим отображения", 16, primaryTextColor(), Typeface.BOLD).apply {
+            setPadding(dp(12), dp(8), dp(12), dp(2))
+        })
+        val modeGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        ZoneDisplayMode.entries.forEach { mode ->
+            modeGroup.addView(RadioButton(this).apply {
+                id = View.generateViewId()
+                text = mode.title()
+                tag = mode
+                isChecked = mode == currentMode
+                textSize = scaledSp(15)
+                setTextColor(primaryTextColor())
+                setPadding(dp(12), 0, dp(12), 0)
+            }, RadioGroup.LayoutParams(-1, dp(46)))
+        }
+        content.addView(modeGroup, LinearLayout.LayoutParams(-1, -2))
+        content.addView(text("Типы объектов", 16, primaryTextColor(), Typeface.BOLD).apply {
+            setPadding(dp(12), dp(12), dp(12), dp(2))
+        })
+        val scopeGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        ZoneObjectScope.entries.forEach { scope ->
+            scopeGroup.addView(RadioButton(this).apply {
+                id = View.generateViewId()
+                text = scope.title()
+                tag = scope
+                isChecked = scope == currentScope
+                textSize = scaledSp(15)
+                setTextColor(primaryTextColor())
+                setPadding(dp(12), 0, dp(12), 0)
+            }, RadioGroup.LayoutParams(-1, dp(46)))
+        }
+        content.addView(scopeGroup, LinearLayout.LayoutParams(-1, -2))
+        modeGroup.setOnCheckedChangeListener { group, checkedId ->
+            val mode = group.findViewById<RadioButton>(checkedId)?.tag as? ZoneDisplayMode
+                ?: return@setOnCheckedChangeListener
+            settingsPreferences.edit().putString(AppSettings.ZONE_DISPLAY_MODE, mode.name).apply()
+        }
+        scopeGroup.setOnCheckedChangeListener { group, checkedId ->
+            val scope = group.findViewById<RadioButton>(checkedId)?.tag as? ZoneObjectScope
+                ?: return@setOnCheckedChangeListener
+            settingsPreferences.edit().putString(AppSettings.ZONE_OBJECT_SCOPE, scope.name).apply()
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(content, FrameLayout.LayoutParams(-1, -2))
+        }
         val dialog = AlertDialog.Builder(this, dialogTheme())
             .setTitle("Отображение зон")
-            .setSingleChoiceItems(titles, current.ordinal) { choice, which ->
-                settingsPreferences.edit()
-                    .putString(AppSettings.ZONE_DISPLAY_MODE, modes[which].name)
-                    .apply()
-                choice.dismiss()
-            }
-            .setNegativeButton("Отмена", null)
+            .setView(scroll)
+            .setNegativeButton("Назад") { _, _ -> showMapMenu() }
             .create()
         trackSettingsMenuDialog(dialog)
         dialog.show()
@@ -824,7 +1210,14 @@ class MainActivity : Activity() {
                     .commit()
             }
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, "Масштаб интерфейса") { stepped ->
+                val value = AppSettings.MIN_UI_SCALE_PERCENT +
+                    stepped.progress * AppSettings.UI_SCALE_STEP_PERCENT
+                settingsPreferences.edit().putInt(AppSettings.UI_SCALE_PERCENT, value).commit()
+            },
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
@@ -869,7 +1262,14 @@ class MainActivity : Activity() {
                     .commit()
             }
         })
-        controls.addView(seekBar, LinearLayout.LayoutParams(-1, dp(42)))
+        controls.addView(
+            sliderWithStepButtons(seekBar, "Масштаб карты") { stepped ->
+                val value = AppSettings.MIN_MAP_SCALE_PERCENT +
+                    stepped.progress * AppSettings.MAP_SCALE_STEP_PERCENT
+                settingsPreferences.edit().putInt(AppSettings.MAP_SCALE_PERCENT, value).commit()
+            },
+            LinearLayout.LayoutParams(-1, dp(48)),
+        )
         return row
     }
 
