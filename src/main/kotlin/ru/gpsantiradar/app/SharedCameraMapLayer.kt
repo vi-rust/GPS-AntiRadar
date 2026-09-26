@@ -79,7 +79,6 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     private var destroyed = false
 
     private val markerIcons = HashMap<String, ImageProvider>()
-    private val markerResources = HashMap<Int, Int>()
     private val clusterIcons = HashMap<Int, ImageProvider>()
     private val renderedCameras = HashMap<Long, CameraPoint>()
     private val renderedCameraCoverage = HashMap<Long, List<PolygonMapObject>>()
@@ -404,7 +403,6 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         renderedCameras.clear()
         activeCameraIds = emptySet()
         markerIcons.clear()
-        markerResources.clear()
         clusterIcons.clear()
         locationPlacemark = null
         cameraMarkerCollection = null
@@ -418,7 +416,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     }
 
     private fun removeOwnedCollection(collection: MapObjectCollection?) {
-        if (collection != null && collection.isValid && collection.parent != null) {
+        if (collection != null && collection.isValid) {
             collection.parent.remove(collection)
         }
     }
@@ -737,10 +735,50 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         }
     }
 
-    private fun cameraIconResource(type: Int): Int = markerResources.getOrPut(type) {
-        val context = checkNotNull(resourceContext)
-        val found = context.resources.getIdentifier("cam_type_$type", "drawable", context.packageName)
-        if (found == 0) R.drawable.cam_type_0 else found
+    private fun cameraIconResource(type: Int): Int = when (type) {
+        1 -> R.drawable.cam_type_1
+        2 -> R.drawable.cam_type_2
+        3 -> R.drawable.cam_type_3
+        4 -> R.drawable.cam_type_4
+        5 -> R.drawable.cam_type_5
+        6 -> R.drawable.cam_type_6
+        7 -> R.drawable.cam_type_7
+        10 -> R.drawable.cam_type_10
+        11 -> R.drawable.cam_type_11
+        12 -> R.drawable.cam_type_12
+        13 -> R.drawable.cam_type_13
+        14 -> R.drawable.cam_type_14
+        15 -> R.drawable.cam_type_15
+        16 -> R.drawable.cam_type_16
+        17 -> R.drawable.cam_type_17
+        18 -> R.drawable.cam_type_18
+        41 -> R.drawable.cam_type_41
+        42 -> R.drawable.cam_type_42
+        43 -> R.drawable.cam_type_43
+        61 -> R.drawable.cam_type_61
+        62 -> R.drawable.cam_type_62
+        63 -> R.drawable.cam_type_63
+        64 -> R.drawable.cam_type_64
+        65 -> R.drawable.cam_type_65
+        103 -> R.drawable.cam_type_103
+        104 -> R.drawable.cam_type_104
+        105 -> R.drawable.cam_type_105
+        106 -> R.drawable.cam_type_106
+        107 -> R.drawable.cam_type_107
+        108 -> R.drawable.cam_type_108
+        171 -> R.drawable.cam_type_171
+        172 -> R.drawable.cam_type_172
+        701 -> R.drawable.cam_type_701
+        702 -> R.drawable.cam_type_702
+        703 -> R.drawable.cam_type_703
+        704 -> R.drawable.cam_type_704
+        705 -> R.drawable.cam_type_705
+        706 -> R.drawable.cam_type_706
+        707 -> R.drawable.cam_type_707
+        709 -> R.drawable.cam_type_709
+        710 -> R.drawable.cam_type_710
+        711 -> R.drawable.cam_type_711
+        else -> R.drawable.cam_type_0
     }
 
     private fun createCameraBitmap(resourceId: Int, userDefined: Boolean): Bitmap {

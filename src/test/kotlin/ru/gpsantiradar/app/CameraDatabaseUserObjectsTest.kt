@@ -35,7 +35,7 @@ class CameraDatabaseUserObjectsTest {
             val saved = database.addUserObject(userCamera())
 
             assertTrue(saved.userDefined)
-            assertEquals(1, database.userObjectCount())
+            assertEquals(1, userObjects(database).size)
             assertEquals(
                 saved.id,
                 database.nearby(56.84, 60.61, 1000.0)!!.single { it.userDefined }.id,
@@ -47,12 +47,12 @@ class CameraDatabaseUserObjectsTest {
             saved.type = 2
             saved.distanceMeters = 800
             assertTrue(database.updateUserObject(saved))
-            val updated = database.userObjects().single()
+            val updated = userObjects(database).single()
             assertEquals(2, updated.type)
             assertEquals(800, updated.distanceMeters)
             assertTrue(database.deleteUserObject(saved.id))
             assertFalse(database.deleteUserObject(saved.id))
-            assertEquals(0, database.userObjectCount())
+            assertTrue(userObjects(database).isEmpty())
         }
     }
 
@@ -63,8 +63,9 @@ class CameraDatabaseUserObjectsTest {
             database.importRadarBase(ByteArrayInputStream(RADAR_BASE.toByteArray(StandardCharsets.UTF_8)))
 
             assertEquals(2, database.count())
-            assertEquals(saved.id, database.userObjects().single().id)
-            assertTrue(database.userObjects().single().userDefined)
+            val userObject = userObjects(database).single()
+            assertEquals(saved.id, userObject.id)
+            assertTrue(userObject.userDefined)
         }
     }
 
@@ -79,7 +80,6 @@ class CameraDatabaseUserObjectsTest {
         }
 
         CameraDatabase(context).use { database ->
-            assertEquals(0, database.userObjectCount())
             assertEquals(0, database.count())
         }
     }
@@ -92,6 +92,9 @@ class CameraDatabaseUserObjectsTest {
         distanceMeters = 500
         speedRules = SpeedControlRules.encode(60, false, -1, -1, 0, 0, SpeedControlRules.CAR)
     }
+
+    private fun userObjects(database: CameraDatabase) =
+        database.withinBounds(-90.0, 90.0, -180.0, 180.0, 100).filter { it.userDefined }
 
     companion object {
         private const val DATABASE_NAME = "speedcams.db"

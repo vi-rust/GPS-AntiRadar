@@ -82,10 +82,6 @@ class CameraDatabase(context: Context) :
         if (it.moveToFirst()) it.getInt(0) else 0
     }
 
-    fun userObjectCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM user_objects", null).use {
-        if (it.moveToFirst()) it.getInt(0) else 0
-    }
-
     fun addUserObject(point: CameraPoint): CameraPoint {
         validateUserObject(point)
         val values = cameraValues(point)
@@ -113,12 +109,6 @@ class CameraDatabase(context: Context) :
         if (localId <= 0L) return false
         return writableDatabase.delete("user_objects", "id=?", arrayOf(localId.toString())) > 0
     }
-
-    fun userObjects(): List<CameraPoint> = query(
-        userObjectColumns() + "FROM user_objects ORDER BY id DESC",
-        emptyArray(),
-        true,
-    )
 
     fun nearby(lat: Double, lon: Double, radiusMeters: Double): List<CameraPoint>? {
         val latDelta = radiusMeters / 111320.0

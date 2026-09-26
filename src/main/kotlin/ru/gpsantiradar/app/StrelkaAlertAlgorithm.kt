@@ -6,7 +6,6 @@ object StrelkaAlertAlgorithm {
     const val SEARCH_RADIUS_METERS = 1600
     const val ACQUIRE_DIRECTION_TOLERANCE_DEGREES = 25
     const val RETAIN_DIRECTION_TOLERANCE_DEGREES = 45
-    const val OVERSPEED_THRESHOLD_KMH = AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH
     const val MAX_APPROACH_CONFIDENCE = 100f
     private const val ZONE_MARGIN = 1.1
     private const val CONFIDENCE_DECAY_FACTOR = 0.5f
@@ -51,7 +50,6 @@ object StrelkaAlertAlgorithm {
     }
 
     fun shouldActivate(confidence: Float, distanceMeters: Int) = confidence > distanceMeters * 0.1f
-    fun isOverspeeding(camera: CameraPoint, speedKmh: Float) = isOverspeeding(camera, speedKmh, OVERSPEED_THRESHOLD_KMH)
     fun isOverspeeding(camera: CameraPoint, speedKmh: Float, thresholdKmh: Int): Boolean {
         val limit = camera.currentSpeedLimit()
         return limit > 0 && speedKmh > limit + AppSettings.clampOverspeedThreshold(thresholdKmh)
@@ -66,7 +64,6 @@ object StrelkaAlertAlgorithm {
         distanceMeters > 5 -> 10; else -> 0
     }
     fun beepVolume(distanceMeters: Int) = max(0.05f, min(1f, 1.6f - distanceMeters * 0.002f))
-    fun screenSummary() = screenSummary(OVERSPEED_THRESHOLD_KMH)
     fun screenSummary(thresholdKmh: Int) =
         "1600 м → коридор → подтверждение → голос один раз → сигнал при +${AppSettings.clampOverspeedThreshold(thresholdKmh)} км/ч → полный выход/сброс"
 

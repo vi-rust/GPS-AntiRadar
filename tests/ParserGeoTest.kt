@@ -128,7 +128,8 @@ check(!StrelkaAlertAlgorithm.matchesZone(missingDistance, 1.0, 0f, 0f),
 "objects without database distance never enter the alert zone")
 check(StrelkaAlertAlgorithm.mustDropImmediately(directed, 50f, 10.0, 0f, 180f),
 "ordinary camera is dropped after passing")
-check((!StrelkaAlertAlgorithm.isOverspeeding(directed, 70f) && StrelkaAlertAlgorithm.isOverspeeding(directed, 71f)),
+check((!StrelkaAlertAlgorithm.isOverspeeding(directed, 70f, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH) &&
+    StrelkaAlertAlgorithm.isOverspeeding(directed, 71f, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH)),
 "beeper starts only above the 10 km/h tolerance")
 check((AppSettings.clampOverspeedThreshold(-1) == 0
 && AppSettings.clampOverspeedThreshold(7) == 7

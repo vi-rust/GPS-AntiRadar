@@ -272,7 +272,7 @@ $Readme = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Project "READ
 Assert-Contains $Readme 'Android Auto' "README must document Android Auto"
 Assert-Contains $Readme 'DHU' "README must document DHU testing"
 foreach ($IconName in @(
-        "ic_car_zoom_in.xml", "ic_car_zoom_out.xml", "ic_car_pan.xml",
+        "ic_car_zoom_in.xml", "ic_car_zoom_out.xml",
         "ic_car_location.xml", "ic_car_menu.xml")) {
     $IconPath = Join-Path $Project "res\drawable\$IconName"
     if (-not (Test-Path -LiteralPath $IconPath)) { throw "Android Auto icon is missing: $IconName" }

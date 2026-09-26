@@ -5,7 +5,6 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import java.io.IOException
@@ -94,21 +93,12 @@ class StrelkaSoundPlayer(context: Context) :
             audioFocusHeld = true
             return
         }
-        if (Build.VERSION.SDK_INT >= 26) {
-            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(audioAttributes)
-                .build()
-            focusRequest = request
-            audioFocusHeld = manager.requestAudioFocus(request) ==
-                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        } else {
-            @Suppress("DEPRECATION")
-            audioFocusHeld = manager.requestAudioFocus(
-                null,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
-            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        }
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(audioAttributes)
+            .build()
+        focusRequest = request
+        audioFocusHeld = manager.requestAudioFocus(request) ==
+            AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
     private fun abandonAudioFocus() {
@@ -122,12 +112,9 @@ class StrelkaSoundPlayer(context: Context) :
             return
         }
         val request = focusRequest
-        if (Build.VERSION.SDK_INT >= 26 && request != null) {
+        if (request != null) {
             manager.abandonAudioFocusRequest(request)
             focusRequest = null
-        } else {
-            @Suppress("DEPRECATION")
-            manager.abandonAudioFocus(null)
         }
         audioFocusHeld = false
     }

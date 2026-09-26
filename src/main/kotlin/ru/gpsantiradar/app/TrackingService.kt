@@ -61,9 +61,7 @@ class TrackingService : Service(), LocationListener {
     }
 
     private fun startTracking() {
-        if (
-            Build.VERSION.SDK_INT >= 23 &&
-            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) !=
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             stopSelf()
@@ -299,7 +297,7 @@ class TrackingService : Service(), LocationListener {
         if (LocationManager.GPS_PROVIDER != location.provider || !location.hasSpeed()) return 0f
         val metersPerSecond = max(0f, location.speed)
         var stationaryThreshold = 0.8f
-        if (Build.VERSION.SDK_INT >= 26 && location.hasSpeedAccuracy()) {
+        if (location.hasSpeedAccuracy()) {
             stationaryThreshold = max(stationaryThreshold, location.speedAccuracyMetersPerSecond)
         }
         return if (metersPerSecond <= stationaryThreshold) 0f else metersPerSecond * 3.6f
@@ -372,15 +370,9 @@ class TrackingService : Service(), LocationListener {
 
     private fun notification(text: String): Notification {
         val open = Intent(this, MainActivity::class.java)
-        var pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT
-        if (Build.VERSION.SDK_INT >= 23) pendingFlags = pendingFlags or PendingIntent.FLAG_IMMUTABLE
+        val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val content = PendingIntent.getActivity(this, 0, open, pendingFlags)
-        val builder = if (Build.VERSION.SDK_INT >= 26) {
-            Notification.Builder(this, CHANNEL)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        val builder = Notification.Builder(this, CHANNEL)
         return builder.setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("GPS AntiRadar работает")
             .setContentText(text)
@@ -391,15 +383,13 @@ class TrackingService : Service(), LocationListener {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(
-                CHANNEL,
-                "GPS-предупреждения",
-                NotificationManager.IMPORTANCE_LOW,
-            )
-            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-                .createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL,
+            "GPS-предупреждения",
+            NotificationManager.IMPORTANCE_LOW,
+        )
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+            .createNotificationChannel(channel)
     }
 
     private fun stopTracking() {
@@ -408,8 +398,7 @@ class TrackingService : Service(), LocationListener {
         } catch (_: RuntimeException) {
         }
         sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
-        @Suppress("DEPRECATION")
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
