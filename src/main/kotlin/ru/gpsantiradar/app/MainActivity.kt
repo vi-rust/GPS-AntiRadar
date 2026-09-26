@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
@@ -452,10 +453,12 @@ class MainActivity : Activity() {
 
     private fun showQuickAddUserObjectDialog(position: Point) {
         val objectTypes = RadarBaseTypes.allTypes()
-        val titles = objectTypes.map(RadarBaseTypes::name).toTypedArray()
+        val titles = objectTypes.map(RadarBaseTypes::name)
         val dialog = AlertDialog.Builder(this, dialogTheme())
             .setTitle("Тип нового объекта")
-            .setItems(titles) { _, index -> addUserObjectAt(position, objectTypes[index]) }
+            .setAdapter(
+                scaledTextAdapter(titles, android.R.layout.simple_list_item_1),
+            ) { _, index -> addUserObjectAt(position, objectTypes[index]) }
             .setNegativeButton("Отмена", null)
             .create()
         dialog.show()
@@ -515,10 +518,10 @@ class MainActivity : Activity() {
             setPadding(0, dp(14), 0, dp(4))
         })
         val typeSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
+            adapter = scaledTextAdapter(
                 objectTypes.map(RadarBaseTypes::name),
+                android.R.layout.simple_spinner_item,
+                android.R.layout.simple_spinner_dropdown_item,
             )
             setSelection(max(0, objectTypes.indexOf(existing.type)))
         }
@@ -527,9 +530,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(10), 0, dp(4))
         })
         val directionSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
+            adapter = scaledTextAdapter(
                 listOf(
                     "Все направления",
                     "Навстречу потоку",
@@ -537,6 +538,8 @@ class MainActivity : Activity() {
                     "В спину потоку",
                     "В лицо и в спину потоку",
                 ),
+                android.R.layout.simple_spinner_item,
+                android.R.layout.simple_spinner_dropdown_item,
             )
             setSelection(max(0, directionTypes.indexOf(existing.dirType)))
         }
@@ -694,7 +697,7 @@ class MainActivity : Activity() {
     ): Button = Button(this).apply {
         text = caption
         contentDescription = description
-        textSize = 22f
+        textSize = scaledSp(22)
         setTextColor(primaryTextColor())
         background = roundedBackground(inputSurfaceColor(), 8)
         minWidth = 0
@@ -1151,10 +1154,16 @@ class MainActivity : Activity() {
     private fun showThemeDialog() {
         val current = ThemeSettings.mode(this)
         val modes = ThemeMode.entries.toTypedArray()
-        val titles = Array(modes.size) { modes[it].title() }
+        val titles = List(modes.size) { modes[it].title() }
         val dialog = AlertDialog.Builder(this, dialogTheme())
             .setTitle("Тема")
-            .setSingleChoiceItems(titles, current.ordinal) { choice, which ->
+            .setSingleChoiceItems(
+                scaledTextAdapter(
+                    titles,
+                    android.R.layout.simple_list_item_single_choice,
+                ),
+                current.ordinal,
+            ) { choice, which ->
                 val selected = modes[which]
                 if (selected != ThemeSettings.mode(this@MainActivity)) {
                     ThemeSettings.setMode(this@MainActivity, selected)
@@ -1405,7 +1414,7 @@ class MainActivity : Activity() {
             setImageResource(iconResource)
             tintIcon(this)
             contentDescription = description
-            scaleType = ImageView.ScaleType.CENTER
+            scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = roundedBackground(controlSurfaceColor(), 7)
             elevation = dp(4).toFloat()
@@ -1416,7 +1425,7 @@ class MainActivity : Activity() {
             setImageResource(iconResource)
             tintIcon(this)
             contentDescription = description
-            scaleType = ImageView.ScaleType.CENTER
+            scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(10), dp(10), dp(10), dp(10))
             setBackgroundColor(Color.TRANSPARENT)
         }
@@ -1465,7 +1474,10 @@ class MainActivity : Activity() {
         val alertTitleId = resources.getIdentifier("alertTitle", "id", "android")
         dialog.findViewById<TextView>(alertTitleId)?.textSize = scaledSp(20)
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.textSize = scaledSp(14)
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.textSize = scaledSp(14)
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.textSize = scaledSp(14)
+        val messageId = resources.getIdentifier("message", "id", "android")
+        dialog.findViewById<TextView>(messageId)?.textSize = scaledSp(16)
     }
 
     private fun refreshThemeIfNeeded(): Boolean = applyResolvedTheme(ThemeSettings.isDark(this))
@@ -1642,6 +1654,27 @@ class MainActivity : Activity() {
             setTextColor(color)
             typeface = Typeface.create("sans", style)
         }
+
+    private fun scaledTextAdapter(
+        values: List<String>,
+        itemLayout: Int,
+        dropdownLayout: Int = itemLayout,
+        textSp: Int = 16,
+    ): ArrayAdapter<String> = object : ArrayAdapter<String>(this, itemLayout, values) {
+        init {
+            setDropDownViewResource(dropdownLayout)
+        }
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+            scaleText(super.getView(position, convertView, parent))
+
+        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
+            scaleText(super.getDropDownView(position, convertView, parent))
+
+        private fun scaleText(view: View): View = view.apply {
+            findViewById<TextView>(android.R.id.text1)?.textSize = scaledSp(textSp)
+        }
+    }
 
     private fun roundedBackground(color: Int, radiusDp: Int): GradientDrawable =
         GradientDrawable().apply {

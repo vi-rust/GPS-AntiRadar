@@ -657,7 +657,8 @@ check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
 check((current!!.changes.contains("пользовательские объекты")
 && current!!.changes.contains("долгим нажатием")
-&& current!!.changes.contains("RadarBase")),
+&& current!!.changes.contains("RadarBase")
+&& current!!.changes.contains("масштабирование")),
 "current release describes user-defined objects")
 val previous = ReleaseHistory.find("4.9.14")
 check((previous != null && previous!!.changes.contains("масштаба интерфейса")

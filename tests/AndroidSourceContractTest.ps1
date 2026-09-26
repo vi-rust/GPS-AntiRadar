@@ -161,6 +161,14 @@ Assert-Contains $Activity 'AppSettings\.LOCATION_ARROW_SCALE' "Phone menu must e
 Assert-Contains $Activity 'AppSettings\.UI_SCALE_PERCENT' "Interface menu must expose in-app UI scale"
 Assert-Contains $Activity 'resources\.displayMetrics\.density \* uiScaleFactor' "In-app UI scale must affect dimensions without changing system density"
 Assert-Contains $Activity 'textSize = scaledSp\(sp\)' "In-app UI scale must affect application text"
+Assert-Contains $Activity 'private fun scaledTextAdapter\(' "System-backed list controls must share the UI text scale"
+Assert-Contains $Activity 'override fun getView[\s\S]*?override fun getDropDownView[\s\S]*?scaledSp\(textSp\)' "Spinner values and dropdown rows must both use the UI text scale"
+Assert-Contains $Activity 'textSize = scaledSp\(22\)' "Slider step button text must use the UI text scale"
+Assert-Contains $Activity 'BUTTON_NEUTRAL\)\?\.textSize = scaledSp\(14\)' "Every dialog action button must use the UI text scale"
+Assert-Contains $Activity 'messageId\)\?\.textSize = scaledSp\(16\)' "Dialog messages must use the UI text scale"
+if (([regex]::Matches($Activity, 'scaleType = ImageView\.ScaleType\.FIT_CENTER')).Count -lt 2) {
+    throw "Main-screen action icons must scale with their button bounds"
+}
 Assert-Contains $Activity 'mapWindow\.setScaleFactor\(mapScaleFactor\)' "MapKit rendering must use its independent map scale"
 Assert-Contains $Settings 'DEFAULT_UI_SCALE_PERCENT = 100' "UI scale must default to 100 percent"
 Assert-Contains $Settings 'MIN_UI_SCALE_PERCENT = 100' "UI scale minimum must remain 100 percent"
