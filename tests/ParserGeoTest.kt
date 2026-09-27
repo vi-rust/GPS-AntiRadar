@@ -641,9 +641,9 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 19, "about dialog contains every known release")
+check(releases!!.size == 20, "about dialog contains every known release")
 check(releases!!.map { it.version } == listOf(
-"4.9.15", "4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
+"4.9.16", "4.9.15", "4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
 "4.9.6", "4.9.5", "4.9.4", "4.9.3", "4.9.2", "4.9.1", "4.9.0",
 "4.8.1", "4.8.0", "4.7.1"),
 "release history is newest first")
@@ -652,19 +652,18 @@ for (release in releases!!)
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.15")
+val current = ReleaseHistory.find("4.9.16")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("пользовательские объекты")
-&& current!!.changes.contains("долгим нажатием")
-&& current!!.changes.contains("RadarBase")
-&& current!!.changes.contains("масштабирование")),
-"current release describes user-defined objects")
-val previous = ReleaseHistory.find("4.9.14")
-check((previous != null && previous!!.changes.contains("масштаба интерфейса")
-&& previous!!.changes.contains("слайдер")
-&& previous!!.changes.contains("100%")),
-"previous release keeps its slider-based scaling description")
+check((current!!.changes.contains("Android Automotive 9")
+&& current!!.changes.contains("AudioTrack")
+&& current!!.changes.contains("beep")),
+"current release describes Automotive audio playback")
+val previous = ReleaseHistory.find("4.9.15")
+check((previous != null && previous!!.changes.contains("пользовательские объекты")
+&& previous!!.changes.contains("долгим нажатием")
+&& previous!!.changes.contains("RadarBase")),
+"previous release keeps its user-defined object description")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

@@ -123,10 +123,20 @@ foreach ($LegacyAlertSymbol in @("strelkaAlertsEnabled", "TextToSpeech", "roadAl
 }
 Assert-Contains $Algorithm 'speedKmh > limit \+ AppSettings\.clampOverspeedThreshold\(thresholdKmh\)' "Overspeed threshold must remain strict and non-inclusive"
 Assert-Contains $SoundPlayer 'USAGE_ASSISTANCE_NAVIGATION_GUIDANCE' "Voice alerts must use navigation-guidance audio routing"
-Assert-Contains $SoundPlayer 'add\("cam_stop_voice\.mp3", 1f\)[\s\S]*playNextIfIdle\(\)' "The object-finished phrase must follow the common sound queue rules"
-Assert-Contains $SoundPlayer 'scheduleAudioFocusAbandon\(\)' "Audio focus must remain active briefly after playback"
-Assert-Contains $SoundPlayer 'PLAYBACK_TAIL_RELEASE_DELAY_MS = 750L' "Completed players must retain the GWM audio tail"
-Assert-Contains $SoundPlayer 'retiringPlayers\.add\(completed\)' "Completed players must not be released synchronously"
+Assert-Contains $SoundPlayer 'add\("cam_stop_voice\.mp3", 1f\)[\s\S]*startWorkerIfNeeded\(\)' "The object-finished phrase must follow the common PCM queue rules"
+Assert-Contains $SoundPlayer 'AUDIO_ROUTE_WARMUP_MS = 100L' "Cold Automotive audio routes must use the current test warmup"
+Assert-Contains $SoundPlayer 'AudioTrack\.MODE_STREAM' "All alerts must share one streaming AudioTrack session"
+Assert-Contains $SoundPlayer 'MediaExtractor\(\)' "MP3 assets must be decoded into PCM"
+Assert-Contains $SoundPlayer 'MediaCodec\.createDecoderByType' "MP3 decoding must use the platform codec"
+Assert-Contains $SoundPlayer 'writeSilence\(track, AUDIO_ROUTE_WARMUP_MS\)' "Route warmup must be written into the same PCM stream"
+Assert-Contains $SoundPlayer 'writeSilence\(track, AUDIO_ROUTE_WARMUP_MS\)[\s\S]*?track\.play\(\)' "The Automotive route must be prebuffered before AudioTrack starts"
+Assert-Contains $SoundPlayer 'val bufferSize = max\(minimum, warmupBufferSize\)' "Short beeps must not be blocked by a half-second AudioTrack buffer"
+Assert-Contains $SoundPlayer 'writeSilence\(track, PLAYBACK_TAIL_DURATION_MS\)' "The playback tail must be written into the same PCM stream"
+Assert-Contains $SoundPlayer 'PLAYBACK_TAIL_DURATION_MS = 100L' "The Automotive PCM tail must use the current 100 ms test value"
+Assert-Contains $SoundPlayer 'AUDIO_FOCUS_RELEASE_DELAY_MS = 100L' "Audio focus must use the current test release delay"
+if (Test-Path -LiteralPath (Join-Path $Project 'assets\sounds\playback_tail.wav')) {
+    throw "The obsolete external playback-tail asset must not return"
+}
 
 Assert-Contains $SharedMapLayer 'val latPadding = \(north - south\) \* 0\.20' "Latitude viewport padding must remain 20 percent"
 Assert-Contains $SharedMapLayer 'val lonPadding = \(east - west\) \* 0\.20' "Longitude viewport padding must remain 20 percent"
@@ -245,8 +255,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*50' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.15"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*51' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.16"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },
