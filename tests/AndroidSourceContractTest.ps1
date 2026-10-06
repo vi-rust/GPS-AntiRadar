@@ -255,8 +255,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*51' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'versionName\s*=\s*"4\.9\.16"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*52' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'appVersionName\s*=\s*"4\.9\.17"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },
