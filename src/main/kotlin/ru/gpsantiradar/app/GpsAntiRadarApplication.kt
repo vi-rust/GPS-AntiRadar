@@ -11,6 +11,7 @@ class GpsAntiRadarApplication : Application() {
     })
     private val radarBaseUpdateGuard = RadarBaseUpdateSingleFlight()
     private lateinit var radarBaseUpdater: RadarBaseUpdater
+    private val routeManager = RouteManager()
 
     override fun onCreate() {
         super.onCreate()
@@ -20,6 +21,7 @@ class GpsAntiRadarApplication : Application() {
     fun acquireMapKit() = mapKitLifecycle.acquire()
     fun releaseMapKit() = mapKitLifecycle.release()
     fun radarBaseUpdater(): RadarBaseUpdater = radarBaseUpdater
+    fun routeManager(): RouteManager = routeManager
 
     companion object {
         private var initialized = false

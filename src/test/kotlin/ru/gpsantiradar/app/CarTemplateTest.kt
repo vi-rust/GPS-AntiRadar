@@ -60,11 +60,11 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.17", BuildConfig.VERSION_NAME)
+assertEquals("4.9.18", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("97"))
-assertTrue(release!!.changes.contains("звуковых"))
+assertTrue(release!!.changes.contains("маршрут"))
+assertTrue(release!!.changes.contains("Android Auto"))
 }
 
 @Test @Throws(Exception::class)

@@ -41,8 +41,10 @@ class CarMapPresentation(
     private val distanceView: TextView
     private val cameraView: TextView
     private val hintView: TextView
+    private val routeView: TextView
     private var mapView: MapView? = null
     private var mapLayer: SharedCameraMapLayer? = null
+    private var routeMapLayer: RouteMapLayer? = null
     private var gestureController: CarMapGestureController? = null
     private var stableArea: Rect? = null
     private var visibleArea: Rect? = null
@@ -60,6 +62,10 @@ class CarMapPresentation(
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!destroyed) mainHandler.post { applySettingChange(key) }
     }
+    private val routeListener = RouteManager.Listener { snapshot ->
+        if (!destroyed) mainHandler.post { renderRoute(snapshot) }
+    }
+
     private val themeRefresh = object : Runnable {
         override fun run() {
             if (destroyed) return
@@ -106,6 +112,17 @@ class CarMapPresentation(
             Gravity.TOP or Gravity.CENTER_HORIZONTAL,
         ).apply { setMargins(0, dp(8), 0, 0) }
         root.addView(hintView, hintParams)
+
+        routeView = text("", 15, Color.BLACK, Typeface.BOLD).apply {
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            visibility = View.GONE
+        }
+        val routeParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+        ).apply { setMargins(dp(8), 0, dp(8), dp(8)) }
+        root.addView(routeView, routeParams)
 
         onCarConfigurationChanged()
     }
@@ -277,6 +294,9 @@ class CarMapPresentation(
         destroyed = true
         root.removeCallbacks(themeRefresh)
         unregisterSettingsListener()
+        application?.routeManager()?.removeListener(routeListener)
+        routeMapLayer?.destroy()
+        routeMapLayer = null
         mapLayer?.let { layer ->
             try {
                 layer.destroy()
@@ -328,6 +348,8 @@ class CarMapPresentation(
         val view = checkNotNull(mapView)
         view.onStart()
         val mapWindow = view.mapWindow
+        routeMapLayer = RouteMapLayer(mapWindow)
+        application.routeManager().addListener(routeListener, true)
         val layer = SharedCameraMapLayer(context, mapWindow, object : SharedCameraMapLayer.Host {
             override fun postToUi(action: Runnable) {
                 root.post(action)
@@ -370,6 +392,8 @@ class CarMapPresentation(
         distanceView.setTextColor(primary)
         hintView.setTextColor(primary)
         hintView.background = roundedBackground(hintSurface)
+        routeView.setTextColor(primary)
+        routeView.background = roundedBackground(hintSurface)
         refreshHudTransparency()
         mapLayer?.setNightMode(dark)
     }
@@ -384,6 +408,29 @@ class CarMapPresentation(
         if (!settingsRegistered) return
         preferences.unregisterOnSharedPreferenceChangeListener(settingsListener)
         settingsRegistered = false
+    }
+
+    private fun renderRoute(snapshot: RouteSnapshot) {
+        if (destroyed) return
+        routeMapLayer?.render(snapshot)
+        when (snapshot.status) {
+            RouteStatus.IDLE -> routeView.visibility = View.GONE
+            RouteStatus.BUILDING -> {
+                routeView.text = "Строим маршрут…"
+                routeView.visibility = View.VISIBLE
+            }
+            RouteStatus.READY -> {
+                val summary = RouteSummaryFormatter.format(
+                    snapshot.distanceText,
+                    snapshot.durationText,
+                )
+                routeView.text = if (summary.isEmpty()) {
+                    "Маршрут построен"
+                } else summary
+                routeView.visibility = View.VISIBLE
+            }
+            RouteStatus.ERROR -> routeView.visibility = View.GONE
+        }
     }
 
     private fun applySettingChange(key: String?) {

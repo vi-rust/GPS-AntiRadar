@@ -5,7 +5,7 @@ plugins {
     id("com.android.application") version "9.0.1"
 }
 
-val appVersionName = "4.9.17"
+val appVersionName = "4.9.18"
 
 val mapkitApiKey = "74d6077f-f6ce-4e0e-9fca-a2550f5e4036"
 
@@ -17,7 +17,7 @@ android {
         applicationId = "ru.gpsantiradar.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 52
+        versionCode = 53
         versionName = appVersionName
         buildConfigField("String", "MAPKIT_API_KEY", "\"$mapkitApiKey\"")
     }
@@ -88,7 +88,7 @@ base {
 }
 
 dependencies {
-    implementation("com.yandex.android:maps.mobile:4.42.0-lite")
+    implementation("com.yandex.android:maps.mobile:4.42.0-full")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.car.app:app-projected:1.7.0")
