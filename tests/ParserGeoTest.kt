@@ -658,6 +658,10 @@ check(current != null && !current!!.changes.trim().isEmpty(),
 check((current!!.changes.contains("маршрут")
 && current!!.changes.contains("Android Auto")),
 "current release describes route support")
+check((current!!.changes.contains("пробок")
+&& current!!.changes.contains("GPS-шума")
+&& current!!.changes.contains("запрет перетаскивания")),
+"current release describes the completed 4.9.18 feature set")
 val previous = ReleaseHistory.find("4.9.17")
 check((previous != null && previous!!.changes.contains("97")
 && previous!!.changes.contains("звуковых")),

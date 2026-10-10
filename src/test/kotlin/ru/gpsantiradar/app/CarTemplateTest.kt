@@ -65,6 +65,9 @@ val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
 assertTrue(release!!.changes.contains("маршрут"))
 assertTrue(release!!.changes.contains("Android Auto"))
+assertTrue(release!!.changes.contains("пробок"))
+assertTrue(release!!.changes.contains("GPS-шума"))
+assertTrue(release!!.changes.contains("запрет перетаскивания"))
 }
 
 @Test @Throws(Exception::class)
