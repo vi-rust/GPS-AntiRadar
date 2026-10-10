@@ -23,7 +23,7 @@ object CameraMarkerDiff {
             left.distanceMeters == right.distanceMeters && left.reverseDistanceMeters == right.reverseDistanceMeters &&
             left.angleDegrees.compareTo(right.angleDegrees) == 0 && left.rank.compareTo(right.rank) == 0 &&
             left.newbie == right.newbie && left.speedRules == right.speedRules &&
-            left.userDefined == right.userDefined
+            left.userDefined == right.userDefined && left.draggingLocked == right.draggingLocked
 
     class Result internal constructor(
         val removeIds: List<Long>,

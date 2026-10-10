@@ -20,6 +20,8 @@ class CameraPoint {
     var speedRules: String = ""
     /** True when the object was created locally by the user. */
     var userDefined: Boolean = false
+    /** Prevents moving a user object by a long-press drag gesture. */
+    var draggingLocked: Boolean = false
 
     fun currentSpeedLimit(): Int = SpeedControlRules.currentCarLimit(speedRules, System.currentTimeMillis())
     fun isObservation(): Boolean = type == 15
@@ -45,6 +47,7 @@ class CameraPoint {
         copy.newbie = newbie
         copy.speedRules = speedRules
         copy.userDefined = userDefined
+        copy.draggingLocked = draggingLocked
     }
 
     fun directionName(): String = when (dirType) {

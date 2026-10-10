@@ -26,8 +26,19 @@ class CameraDatabase(context: Context) :
     }
 
     private fun createUserObjectsTable(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE IF NOT EXISTS user_objects (id INTEGER PRIMARY KEY AUTOINCREMENT, lat REAL NOT NULL, lon REAL NOT NULL,type INTEGER NOT NULL, dir_type INTEGER NOT NULL, direction REAL NOT NULL,distance_meters INTEGER NOT NULL, reverse_distance_meters INTEGER NOT NULL,angle_degrees REAL NOT NULL, rank REAL NOT NULL, newbie INTEGER NOT NULL,speed_rules TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS user_objects (id INTEGER PRIMARY KEY AUTOINCREMENT, lat REAL NOT NULL, lon REAL NOT NULL,type INTEGER NOT NULL, dir_type INTEGER NOT NULL, direction REAL NOT NULL,distance_meters INTEGER NOT NULL, reverse_distance_meters INTEGER NOT NULL,angle_degrees REAL NOT NULL, rank REAL NOT NULL, newbie INTEGER NOT NULL,speed_rules TEXT NOT NULL,dragging_locked INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE INDEX IF NOT EXISTS user_objects_bounds ON user_objects(lat, lon)")
+    }
+
+    private fun ensureUserObjectDraggingColumn(db: SQLiteDatabase) {
+        val exists = db.rawQuery("PRAGMA table_info(user_objects)", null).use { cursor ->
+            val nameIndex = cursor.getColumnIndex("name")
+            generateSequence { if (cursor.moveToNext()) cursor else null }
+                .any { it.getString(nameIndex) == "dragging_locked" }
+        }
+        if (!exists) {
+            db.execSQL("ALTER TABLE user_objects ADD COLUMN dragging_locked INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -37,12 +48,19 @@ class CameraDatabase(context: Context) :
             createRadarBaseTables(db)
         }
         if (oldVersion < 5) createUserObjectsTable(db)
+        if (oldVersion < 6) {
+            createUserObjectsTable(db)
+            ensureUserObjectDraggingColumn(db)
+        }
     }
 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
         // Recover databases whose version was advanced before the optional table was created.
-        if (!db.isReadOnly) createUserObjectsTable(db)
+        if (!db.isReadOnly) {
+            createUserObjectsTable(db)
+            ensureUserObjectDraggingColumn(db)
+        }
     }
 
     @Throws(IOException::class)
@@ -156,6 +174,7 @@ class CameraDatabase(context: Context) :
         put("distance_meters", point.distanceMeters); put("reverse_distance_meters", point.reverseDistanceMeters)
         put("angle_degrees", point.angleDegrees); put("rank", point.rank)
         put("newbie", if (point.newbie) 1 else 0); put("speed_rules", point.speedRules)
+        put("dragging_locked", if (point.draggingLocked) 1 else 0)
     }
 
     private fun validateUserObject(point: CameraPoint) {
@@ -171,18 +190,19 @@ class CameraDatabase(context: Context) :
 
     companion object {
         private const val DB_NAME = "speedcams.db"
-        private const val DB_VERSION = 5
+        private const val DB_VERSION = 6
         private const val USER_OBJECT_ID_BASE = 4_000_000_000_000_000_000L
         private fun putMetadata(db: SQLiteDatabase, key: String, value: String?) = db.insertOrThrow(
             "metadata", null, ContentValues().apply { put("key", key); put("value", value ?: "") }
         )
-        private fun cameraColumns() = "SELECT id,lat,lon,type,dir_type,direction,distance_meters,reverse_distance_meters,angle_degrees,rank,newbie,speed_rules "
-        private fun userObjectColumns() = "SELECT id+$USER_OBJECT_ID_BASE,lat,lon,type,dir_type,direction,distance_meters,reverse_distance_meters,angle_degrees,rank,newbie,speed_rules "
+        private fun cameraColumns() = "SELECT id,lat,lon,type,dir_type,direction,distance_meters,reverse_distance_meters,angle_degrees,rank,newbie,speed_rules,0 AS dragging_locked "
+        private fun userObjectColumns() = "SELECT id+$USER_OBJECT_ID_BASE,lat,lon,type,dir_type,direction,distance_meters,reverse_distance_meters,angle_degrees,rank,newbie,speed_rules,dragging_locked "
         private fun readCamera(c: Cursor, isUserDefined: Boolean) = CameraPoint().apply {
             id = c.getLong(0); latitude = c.getDouble(1); longitude = c.getDouble(2); type = c.getInt(3)
             dirType = c.getInt(4); direction = c.getFloat(5); distanceMeters = c.getInt(6); reverseDistanceMeters = c.getInt(7)
             angleDegrees = c.getFloat(8); rank = c.getFloat(9); newbie = c.getInt(10) != 0; speedRules = c.getString(11)
             userDefined = isUserDefined
+            draggingLocked = isUserDefined && c.getInt(12) != 0
         }
     }
 }

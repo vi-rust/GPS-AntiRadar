@@ -19,6 +19,10 @@ object CameraHintFormatter {
             .append("\nУгол сектора: ").append(formatDegrees(camera.angleDegrees))
             .append("\nОграничение скорости: ")
             .append(if (speedLimit > 0) "$speedLimit км/ч" else "нет")
+        if (camera.userDefined) {
+            result.append("\nПеретаскивание: ")
+                .append(if (camera.draggingLocked) "запрещено" else "разрешено")
+        }
         if (camera.isCameraOrControl() && camera.dirType == 0) result.append("\nФорма зоны: круг")
         return result.toString()
     }

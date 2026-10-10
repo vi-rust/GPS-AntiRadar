@@ -15,11 +15,13 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.car.app.CarContext
+import com.yandex.mapkit.MapKitFactory
 import com.yandex.mapkit.ScreenPoint
 import com.yandex.mapkit.ScreenRect
 import com.yandex.mapkit.geometry.Point
 import com.yandex.mapkit.map.MapWindow
 import com.yandex.mapkit.mapview.MapView
+import com.yandex.mapkit.traffic.TrafficLayer
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -45,6 +47,7 @@ class CarMapPresentation(
     private var mapView: MapView? = null
     private var mapLayer: SharedCameraMapLayer? = null
     private var routeMapLayer: RouteMapLayer? = null
+    private var trafficLayer: TrafficLayer? = null
     private var gestureController: CarMapGestureController? = null
     private var stableArea: Rect? = null
     private var visibleArea: Rect? = null
@@ -297,6 +300,7 @@ class CarMapPresentation(
         application?.routeManager()?.removeListener(routeListener)
         routeMapLayer?.destroy()
         routeMapLayer = null
+        trafficLayer = null
         mapLayer?.let { layer ->
             try {
                 layer.destroy()
@@ -348,7 +352,16 @@ class CarMapPresentation(
         val view = checkNotNull(mapView)
         view.onStart()
         val mapWindow = view.mapWindow
-        routeMapLayer = RouteMapLayer(mapWindow)
+        val trafficVisible = preferences.getBoolean(
+            AppSettings.TRAFFIC_VISIBLE,
+            AppSettings.DEFAULT_TRAFFIC_VISIBLE,
+        )
+        routeMapLayer = RouteMapLayer(context, mapWindow).apply {
+            setTrafficVisible(trafficVisible)
+        }
+        trafficLayer = MapKitFactory.getInstance().createTrafficLayer(mapWindow).apply {
+            setTrafficVisible(trafficVisible)
+        }
         application.routeManager().addListener(routeListener, true)
         val layer = SharedCameraMapLayer(context, mapWindow, object : SharedCameraMapLayer.Host {
             override fun postToUi(action: Runnable) {
@@ -445,6 +458,14 @@ class CarMapPresentation(
             AppSettings.ZONE_OBJECT_SCOPE,
             -> refreshCoverageSettings()
             AppSettings.LOCATION_ARROW_SCALE -> refreshLocationMarkerStyle()
+            AppSettings.TRAFFIC_VISIBLE -> {
+                val visible = preferences.getBoolean(
+                    AppSettings.TRAFFIC_VISIBLE,
+                    AppSettings.DEFAULT_TRAFFIC_VISIBLE,
+                )
+                routeMapLayer?.setTrafficVisible(visible)
+                trafficLayer?.takeIf { it.isValid }?.setTrafficVisible(visible)
+            }
         }
     }
 

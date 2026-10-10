@@ -1,6 +1,7 @@
 package ru.gpsantiradar.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,8 +41,10 @@ class UserCameraDefaultsTest {
     @Test
     fun userHintContainsEveryEditableParameter() {
         val point = UserCameraDefaults.create(54.609042, 56.151002, 1, 91f).apply {
+            userDefined = true
             reverseDistanceMeters = 150
             angleDegrees = 45f
+            draggingLocked = true
             speedRules = SpeedControlRules.encode(
                 70, false, -1, -1, 0, 0, SpeedControlRules.CAR,
             )
@@ -56,11 +59,15 @@ class UserCameraDefaultsTest {
         assertTrue(hint.contains("Обратная дистанция: 150 м"))
         assertTrue(hint.contains("Угол сектора: 45°"))
         assertTrue(hint.contains("Ограничение скорости: 70 км/ч"))
+        assertTrue(hint.contains("Перетаскивание: запрещено"))
     }
 
     @Test
     fun detachedCopyCanChangeCoordinatesWithoutMutatingRenderedObject() {
-        val rendered = UserCameraDefaults.create(54.609042, 56.151002, 1, 90f).apply { id = -7 }
+        val rendered = UserCameraDefaults.create(54.609042, 56.151002, 1, 90f).apply {
+            id = -7
+            draggingLocked = true
+        }
         val edited = rendered.detachedCopy().apply {
             latitude = 54.7
             type = 107
@@ -71,5 +78,20 @@ class UserCameraDefaultsTest {
         assertEquals(1, rendered.type)
         assertEquals(54.7, edited.latitude, 0.0)
         assertEquals(107, edited.type)
+        assertTrue(edited.draggingLocked)
+    }
+
+    @Test
+    fun changingDraggingLockRefreshesRenderedMarker() {
+        val rendered = UserCameraDefaults.create(54.0, 56.0, 1, 90f).apply {
+            id = 42
+            userDefined = true
+        }
+        val locked = rendered.detachedCopy().apply { draggingLocked = true }
+
+        val difference = CameraMarkerDiff.between(mapOf(rendered.id to rendered), listOf(locked))
+
+        assertFalse(difference.addOrReplace.isEmpty())
+        assertTrue(difference.removeIds.contains(rendered.id))
     }
 }

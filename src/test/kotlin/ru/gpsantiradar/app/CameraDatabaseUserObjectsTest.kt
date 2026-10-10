@@ -35,6 +35,7 @@ class CameraDatabaseUserObjectsTest {
             val saved = database.addUserObject(userCamera())
 
             assertTrue(saved.userDefined)
+            assertFalse(saved.draggingLocked)
             assertEquals(1, userObjects(database).size)
             assertEquals(
                 saved.id,
@@ -46,10 +47,12 @@ class CameraDatabaseUserObjectsTest {
             )
             saved.type = 2
             saved.distanceMeters = 800
+            saved.draggingLocked = true
             assertTrue(database.updateUserObject(saved))
             val updated = userObjects(database).single()
             assertEquals(2, updated.type)
             assertEquals(800, updated.distanceMeters)
+            assertTrue(updated.draggingLocked)
             assertTrue(database.deleteUserObject(saved.id))
             assertFalse(database.deleteUserObject(saved.id))
             assertTrue(userObjects(database).isEmpty())
@@ -70,7 +73,7 @@ class CameraDatabaseUserObjectsTest {
     }
 
     @Test
-    fun openingVersionFiveDatabaseRepairsMissingUserObjectsTable() {
+    fun upgradingVersionFiveDatabaseRepairsMissingUserObjectsTable() {
         val path = context.getDatabasePath(DATABASE_NAME)
         path.parentFile?.mkdirs()
         SQLiteDatabase.openOrCreateDatabase(path, null).use { database ->
@@ -81,6 +84,27 @@ class CameraDatabaseUserObjectsTest {
 
         CameraDatabase(context).use { database ->
             assertEquals(0, database.count())
+        }
+    }
+
+    @Test
+    fun upgradingVersionFiveAddsUnlockedDraggingFlagWithoutLosingObjects() {
+        val path = context.getDatabasePath(DATABASE_NAME)
+        path.parentFile?.mkdirs()
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { database ->
+            database.execSQL("CREATE TABLE cameras (id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,type INTEGER NOT NULL, dir_type INTEGER NOT NULL, direction REAL NOT NULL,distance_meters INTEGER NOT NULL, reverse_distance_meters INTEGER NOT NULL,angle_degrees REAL NOT NULL, rank REAL NOT NULL, newbie INTEGER NOT NULL,speed_rules TEXT NOT NULL)")
+            database.execSQL("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            database.execSQL("CREATE TABLE user_objects (id INTEGER PRIMARY KEY AUTOINCREMENT, lat REAL NOT NULL, lon REAL NOT NULL,type INTEGER NOT NULL, dir_type INTEGER NOT NULL, direction REAL NOT NULL,distance_meters INTEGER NOT NULL, reverse_distance_meters INTEGER NOT NULL,angle_degrees REAL NOT NULL, rank REAL NOT NULL, newbie INTEGER NOT NULL,speed_rules TEXT NOT NULL)")
+            database.execSQL("INSERT INTO user_objects(lat,lon,type,dir_type,direction,distance_meters,reverse_distance_meters,angle_degrees,rank,newbie,speed_rules) VALUES(56.84,60.61,1,0,0,500,0,30,0,0,'')")
+            database.version = 5
+        }
+
+        CameraDatabase(context).use { database ->
+            val migrated = userObjects(database).single()
+            assertFalse(migrated.draggingLocked)
+            migrated.draggingLocked = true
+            assertTrue(database.updateUserObject(migrated))
+            assertTrue(userObjects(database).single().draggingLocked)
         }
     }
 

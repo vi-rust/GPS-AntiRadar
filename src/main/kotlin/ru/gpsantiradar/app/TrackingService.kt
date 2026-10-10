@@ -31,8 +31,10 @@ class TrackingService : Service(), LocationListener {
     private var previousGps: Location? = null
     private var lastRadarScan: Location? = null
     private var radarHeading = Float.NaN
+    private var displayedCameraId = -1L
     private val alertTracker = StrelkaAlertTracker()
     private val radarScanGate = RadarScanGate()
+    private val gpsSignalFilter = GpsSignalFilter()
 
     override fun onCreate() {
         super.onCreate()
@@ -86,8 +88,25 @@ class TrackingService : Service(), LocationListener {
         val gpsLocation = LocationManager.GPS_PROVIDER == location.provider
         if (!gpsLocation && hasRecentGpsFix()) return
 
-        val speedKmh = speed(location)
-        val visualHeading = heading(location)
+        val now = SystemClock.elapsedRealtime()
+        val stabilized = gpsSignalFilter.update(
+            rawLatitude = location.latitude,
+            rawLongitude = location.longitude,
+            rawAccuracyMeters = if (location.hasAccuracy()) location.accuracy else Float.NaN,
+            isGpsProvider = gpsLocation,
+            rawSpeedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
+            speedAccuracyMetersPerSecond = location.speedAccuracyMetersPerSecond
+                .takeIf { location.hasSpeedAccuracy() },
+            measuredHeadingDegrees = location.bearing.takeIf { location.hasBearing() },
+            elapsedRealtimeMillis = now,
+        )
+        val speedKmh = stabilized.speedKmh
+        val trackingLocation = Location(location).apply {
+            latitude = stabilized.latitude
+            longitude = stabilized.longitude
+            accuracy = stabilized.accuracyMeters
+        }
+        val visualHeading = stabilized.headingDegrees.takeIf(Float::isFinite) ?: 0f
         val previousScan = lastRadarScan
         val movementSinceScan = if (previousScan == null) {
             Double.MAX_VALUE
@@ -95,15 +114,14 @@ class TrackingService : Service(), LocationListener {
             Geo.distanceMeters(
                 previousScan.latitude,
                 previousScan.longitude,
-                location.latitude,
-                location.longitude,
+                trackingLocation.latitude,
+                trackingLocation.longitude,
             )
         }
-        val now = SystemClock.elapsedRealtime()
         val scanDecision = radarScanGate.assess(
             now,
-            location.hasAccuracy(),
-            location.accuracy,
+            trackingLocation.hasAccuracy(),
+            trackingLocation.accuracy,
             movementSinceScan,
         )
         var proposedRadarHeading = radarHeading
@@ -111,8 +129,8 @@ class TrackingService : Service(), LocationListener {
             val measuredHeading = Geo.bearing(
                 previousScan.latitude,
                 previousScan.longitude,
-                location.latitude,
-                location.longitude,
+                trackingLocation.latitude,
+                trackingLocation.longitude,
             )
             proposedRadarHeading = if (radarHeading.isNaN()) {
                 measuredHeading
@@ -128,6 +146,13 @@ class TrackingService : Service(), LocationListener {
             previousScan != null,
         )
         val alertHeading = headings.alertHeading
+        (application as? GpsAntiRadarApplication)?.routeManager()?.updateLocation(
+            trackingLocation.latitude,
+            trackingLocation.longitude,
+            headings.visualHeading,
+            if (trackingLocation.hasAccuracy()) trackingLocation.accuracy else Float.NaN,
+            now,
+        )
         val overspeedThresholdKmh = AppSettings.clampOverspeedThreshold(
             getSharedPreferences(AppSettings.PREFERENCES, MODE_PRIVATE).getInt(
                 AppSettings.OVERSPEED_THRESHOLD,
@@ -137,11 +162,14 @@ class TrackingService : Service(), LocationListener {
         var nearest: CameraPoint? = null
         var nearestDistance = Double.MAX_VALUE
         var nearestAlertDistance = 0
+        var retainedDisplayed: CameraPoint? = null
+        var retainedDisplayedDistance = Double.MAX_VALUE
+        var retainedDisplayedAlertDistance = 0
 
         val observations = ArrayList<StrelkaAlertTracker.Observation>()
         var candidates = database.nearby(
-            location.latitude,
-            location.longitude,
+            trackingLocation.latitude,
+            trackingLocation.longitude,
             StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS.toDouble(),
         )
         val candidatesUnavailable = candidates == null
@@ -151,15 +179,15 @@ class TrackingService : Service(), LocationListener {
             val alertDistance = StrelkaAlertAlgorithm.activationDistance(`object`)
             if (alertDistance == 0) continue
             val distance = Geo.distanceMeters(
-                location.latitude,
-                location.longitude,
+                trackingLocation.latitude,
+                trackingLocation.longitude,
                 `object`.latitude,
                 `object`.longitude,
             )
             if (distance > StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS) continue
             val bearing = Geo.bearing(
-                location.latitude,
-                location.longitude,
+                trackingLocation.latitude,
+                trackingLocation.longitude,
                 `object`.latitude,
                 `object`.longitude,
             )
@@ -188,6 +216,11 @@ class TrackingService : Service(), LocationListener {
 
             val relevant = !dropImmediately &&
                 (matchesZone || StrelkaAlertAlgorithm.matchesDirectionForAcquisition(`object`, alertHeading))
+            if (relevant && `object`.id == displayedCameraId) {
+                retainedDisplayed = `object`
+                retainedDisplayedDistance = distance
+                retainedDisplayedAlertDistance = alertDistance
+            }
             if (relevant && distance < nearestDistance) {
                 nearest = `object`
                 nearestDistance = distance
@@ -200,7 +233,7 @@ class TrackingService : Service(), LocationListener {
             alertUpdate = alertTracker.update(observations, speedKmh, scanDecision.gpsRecovered)
             radarScanGate.accept(scanDecision)
             if (previousScan != null) radarHeading = proposedRadarHeading
-            lastRadarScan = Location(location)
+            lastRadarScan = Location(trackingLocation)
         } else {
             alertUpdate = alertTracker.snapshot()
         }
@@ -216,6 +249,30 @@ class TrackingService : Service(), LocationListener {
             nearestDistance = closestActive.distanceMeters.toDouble()
             nearestAlertDistance = closestActive.activationDistance
         }
+        val proposed = nearest
+        val retained = retainedDisplayed
+        if (proposed != null && retained != null && proposed.id != retained.id) {
+            val proposedIsActive = alertUpdate.activeCameraIds.contains(proposed.id)
+            val retainedIsActive = alertUpdate.activeCameraIds.contains(retained.id)
+            val accuracyMargin = if (trackingLocation.hasAccuracy()) {
+                trackingLocation.accuracy * OBJECT_SWITCH_ACCURACY_FACTOR
+            } else {
+                0f
+            }
+            val switchMargin = max(OBJECT_SWITCH_MIN_MARGIN_METERS, accuracyMargin.toDouble())
+            val keepRetained = when {
+                retainedIsActive && !proposedIsActive -> true
+                retainedIsActive == proposedIsActive ->
+                    nearestDistance + switchMargin >= retainedDisplayedDistance
+                else -> false
+            }
+            if (keepRetained) {
+                nearest = retained
+                nearestDistance = retainedDisplayedDistance
+                nearestAlertDistance = retainedDisplayedAlertDistance
+            }
+        }
+        displayedCameraId = nearest?.id ?: -1L
         var finishedObject: CameraPoint? = null
         for (exited in alertUpdate.exited) {
             if (exited.spoken) {
@@ -237,7 +294,7 @@ class TrackingService : Service(), LocationListener {
             nearestAlertDistance,
         )
         sendUpdate(
-            location,
+            trackingLocation,
             speedKmh,
             headings.visualHeading,
             nearest,
@@ -291,30 +348,6 @@ class TrackingService : Service(), LocationListener {
             return "До зоны: ${nearestDistance.roundToInt()} м / $nearestAlertDistance м"
         }
         return "Поиск впереди: ${StrelkaAlertAlgorithm.SEARCH_RADIUS_METERS} м"
-    }
-
-    private fun speed(location: Location): Float {
-        if (LocationManager.GPS_PROVIDER != location.provider || !location.hasSpeed()) return 0f
-        val metersPerSecond = max(0f, location.speed)
-        var stationaryThreshold = 0.8f
-        if (location.hasSpeedAccuracy()) {
-            stationaryThreshold = max(stationaryThreshold, location.speedAccuracyMetersPerSecond)
-        }
-        return if (metersPerSecond <= stationaryThreshold) 0f else metersPerSecond * 3.6f
-    }
-
-    private fun heading(location: Location): Float {
-        if (location.hasBearing() && location.speed > 1.5f) return location.bearing
-        val previous = previousGps
-        if (previous != null && LocationManager.GPS_PROVIDER == location.provider) {
-            return Geo.bearing(
-                previous.latitude,
-                previous.longitude,
-                location.latitude,
-                location.longitude,
-            )
-        }
-        return 0f
     }
 
     private fun hasRecentGpsFix(): Boolean {
@@ -416,6 +449,8 @@ class TrackingService : Service(), LocationListener {
         } catch (_: RuntimeException) {
         }
         alertTracker.clear()
+        gpsSignalFilter.reset()
+        displayedCameraId = -1L
         soundPlayer.release()
         database.close()
         super.onDestroy()
@@ -442,6 +477,8 @@ class TrackingService : Service(), LocationListener {
 
         private const val CHANNEL = "tracking"
         private const val NOTIFICATION_ID = 41
+        private const val OBJECT_SWITCH_MIN_MARGIN_METERS = 25.0
+        private const val OBJECT_SWITCH_ACCURACY_FACTOR = 1.5f
 
         fun requestStop(context: Context?) {
             context ?: return

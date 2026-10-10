@@ -18,20 +18,27 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
@@ -40,9 +47,11 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.yandex.mapkit.MapKitFactory
 import com.yandex.mapkit.ScreenPoint
-import com.yandex.mapkit.geometry.Point
+import com.yandex.mapkit.geometry.BoundingBox
 import com.yandex.mapkit.geometry.Geometry
+import com.yandex.mapkit.geometry.Point
 import com.yandex.mapkit.search.Response
 import com.yandex.mapkit.search.SearchFactory
 import com.yandex.mapkit.search.SearchManager
@@ -50,15 +59,26 @@ import com.yandex.mapkit.search.SearchManagerType
 import com.yandex.mapkit.search.SearchOptions
 import com.yandex.mapkit.search.SearchType
 import com.yandex.mapkit.search.Session
-import com.yandex.runtime.Error
+import com.yandex.mapkit.search.SuggestItem
+import com.yandex.mapkit.search.SuggestOptions
+import com.yandex.mapkit.search.SuggestResponse
+import com.yandex.mapkit.search.SuggestSession
+import com.yandex.mapkit.search.SuggestType
+import com.yandex.mapkit.search.ToponymObjectMetadata
 import com.yandex.mapkit.mapview.MapView
+import com.yandex.mapkit.traffic.TrafficLayer
+import com.yandex.runtime.Error
 import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class MainActivity : Activity() {
     private lateinit var speedView: TextView
@@ -77,14 +97,18 @@ class MainActivity : Activity() {
     private lateinit var zoomInButtonView: ImageButton
     private lateinit var zoomOutButtonView: ImageButton
     private lateinit var positionButtonView: ImageButton
+    private lateinit var trafficButtonView: ImageButton
     private lateinit var cameraHintView: TextView
     private lateinit var routeStatusView: TextView
     private var mapView: MapView? = null
     private var cameraMapLayer: SharedCameraMapLayer? = null
     private var routeMapLayer: RouteMapLayer? = null
+    private var trafficLayer: TrafficLayer? = null
     private var addressSearchManager: SearchManager? = null
-    private var addressSearchSession: Session? = null
-    private var addressSearchListener: Session.SearchListener? = null
+    private var addressSuggestSession: SuggestSession? = null
+    private var addressSuggestListener: SuggestSession.SuggestListener? = null
+    private val addressSearchSessions = mutableListOf<Session>()
+    private val addressSearchListeners = mutableListOf<Session.SearchListener>()
     private var addressSearchRequestId = 0L
     private var lastFittedRouteRequestId = -1L
     private var mapInitialized = false
@@ -100,7 +124,14 @@ class MainActivity : Activity() {
     private var latestSnapshot = DrivingSnapshot.idle()
     private lateinit var settingsPreferences: SharedPreferences
 
-    private data class AddressSearchResult(val title: String, val point: Point)
+    private data class AddressSearchResult(
+        val title: String,
+        val subtitle: String,
+        val distanceMeters: Double,
+        val point: Point?,
+        val suggestAction: SuggestItem.Action? = null,
+        val suggestText: String = "",
+    )
 
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener {
             sharedPreferences,
@@ -121,6 +152,12 @@ class MainActivity : Activity() {
             AppSettings.ZONE_OBJECT_SCOPE,
             -> cameraMapLayer?.refreshCoverageSettings()
             AppSettings.LOCATION_ARROW_SCALE -> cameraMapLayer?.refreshLocationMarkerStyle()
+            AppSettings.TRAFFIC_VISIBLE -> applyTrafficVisibility(
+                sharedPreferences.getBoolean(
+                    AppSettings.TRAFFIC_VISIBLE,
+                    AppSettings.DEFAULT_TRAFFIC_VISIBLE,
+                ),
+            )
         }
     }
 
@@ -261,8 +298,12 @@ class MainActivity : Activity() {
                 val view = MapView(this)
                 mapView = view
                 view.mapWindow.setScaleFactor(mapScaleFactor)
-                val routeLayer = RouteMapLayer(view.mapWindow)
+                val routeLayer = RouteMapLayer(this, view.mapWindow)
+                routeLayer.setTrafficVisible(isTrafficVisible())
                 routeMapLayer = routeLayer
+                trafficLayer = MapKitFactory.getInstance().createTrafficLayer(view.mapWindow).apply {
+                    setTrafficVisible(isTrafficVisible())
+                }
                 screen.addView(view, FrameLayout.LayoutParams(-1, -1))
                 val layer = SharedCameraMapLayer(
                     this,
@@ -305,6 +346,7 @@ class MainActivity : Activity() {
             } catch (_: Throwable) {
                 routeMapLayer?.destroy()
                 routeMapLayer = null
+                trafficLayer = null
                 cameraMapLayer?.destroy()
                 cameraMapLayer = null
                 mapView = null
@@ -450,6 +492,21 @@ class MainActivity : Activity() {
         ).apply { setMargins(0, 0, dp(6), dp(6)) }
         overlay.addView(positionButtonView, positionParams)
 
+        trafficButtonView = iconButton(R.drawable.ic_traffic, "Скрыть пробки").apply {
+            setOnClickListener {
+                val visible = !isTrafficVisible()
+                settingsPreferences.edit().putBoolean(AppSettings.TRAFFIC_VISIBLE, visible).apply()
+                applyTrafficVisibility(visible)
+            }
+        }
+        val trafficParams = FrameLayout.LayoutParams(
+            dp(44),
+            dp(44),
+            Gravity.BOTTOM or Gravity.END,
+        ).apply { setMargins(0, 0, dp(6), dp(58)) }
+        overlay.addView(trafficButtonView, trafficParams)
+        applyTrafficVisibility(isTrafficVisible())
+
         cameraHintView = text("", 14, primaryTextColor(), Typeface.BOLD).apply {
             maxWidth = dp(360)
             setPadding(dp(10), dp(7), dp(10), dp(7))
@@ -536,141 +593,423 @@ class MainActivity : Activity() {
             return
         }
         val input = EditText(this).apply {
-            hint = "Город, улица, дом"
+            hint = "Начните вводить адрес"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
             setSingleLine(true)
+            minLines = 1
+            maxLines = 1
+            setHorizontallyScrolling(true)
+            imeOptions = EditorInfo.IME_ACTION_DONE or
+                EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN
+        }
+        val suggestionItems = mutableListOf<AddressSearchResult>()
+        val suggestionAdapter = object : BaseAdapter() {
+            override fun getCount(): Int = suggestionItems.size
+
+            override fun getItem(position: Int): AddressSearchResult = suggestionItems[position]
+
+            override fun getItemId(position: Int): Long = position.toLong()
+
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val item = getItem(position)
+                val row = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    minimumHeight = dp(76)
+                    background = roundedBackground(controlSurfaceColor(), 7)
+                }
+                val heading = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        text(item.title, 16, primaryTextColor(), Typeface.BOLD),
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(
+                        text(formatAddressDistance(item.distanceMeters), 14, secondaryTextColor(), Typeface.NORMAL),
+                    )
+                }
+                row.addView(
+                    heading,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+                if (item.subtitle.isNotEmpty()) {
+                    row.addView(
+                        text(item.subtitle, 14, secondaryTextColor(), Typeface.NORMAL).apply {
+                            maxLines = 2
+                        },
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { topMargin = dp(3) },
+                    )
+                }
+                return row
+            }
+        }
+        val resultsList = ListView(this).apply {
+            adapter = suggestionAdapter
+            divider = ColorDrawable(Color.TRANSPARENT)
+            dividerHeight = dp(6)
+            visibility = View.GONE
+            isVerticalScrollBarEnabled = true
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), 0)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+            addView(
+                resultsList,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(330)).apply {
+                    topMargin = dp(8)
+                },
+            )
         }
         val dialog = AlertDialog.Builder(this, dialogTheme())
-            .setTitle("Конечный адрес")
-            .setView(input)
-            .setPositiveButton("Найти") { _, _ ->
-                val query = input.text?.toString()?.trim().orEmpty()
-                if (query.isEmpty()) {
-                    Toast.makeText(this, "Введите адрес", Toast.LENGTH_SHORT).show()
-                } else {
-                    searchAddress(query)
-                }
-            }
+            .setView(content)
             .setNegativeButton("Отмена", null)
             .create()
+        var pendingSearch: Runnable? = null
+
+        fun replaceSuggestions(results: List<AddressSearchResult>) {
+            suggestionItems.clear()
+            suggestionItems.addAll(results)
+            suggestionAdapter.notifyDataSetChanged()
+            resultsList.visibility = if (results.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        fun performSearch(query: String) {
+            requestAddressSuggestions(
+                query,
+                onResults = { results ->
+                    if (!dialog.isShowing || input.text.toString().trim() != query) return@requestAddressSuggestions
+                    replaceSuggestions(results)
+                    if (results.isEmpty()) {
+                        input.error = "Ничего не найдено"
+                        return@requestAddressSuggestions
+                    }
+                    input.error = null
+                },
+                onError = { message ->
+                    if (dialog.isShowing && input.text.toString().trim() == query) {
+                        replaceSuggestions(emptyList())
+                        input.error = message
+                    }
+                },
+            )
+        }
+
+        fun scheduleSearch(immediate: Boolean) {
+            pendingSearch?.let(input::removeCallbacks)
+            pendingSearch = null
+            val query = input.text?.toString()?.trim().orEmpty()
+            if (query.length < ADDRESS_SEARCH_MIN_LENGTH) {
+                cancelAddressSearch()
+                replaceSuggestions(emptyList())
+                input.error = null
+                return
+            }
+            val search = Runnable { performSearch(query) }
+            pendingSearch = search
+            if (immediate) input.post(search) else input.postDelayed(search, ADDRESS_SEARCH_DEBOUNCE_MS)
+        }
+
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(text: Editable?) = scheduleSearch(immediate = false)
+        })
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                scheduleSearch(immediate = true)
+                hideKeyboard(input)
+                input.clearFocus()
+                true
+            } else {
+                false
+            }
+        }
+        input.setOnClickListener {
+            input.requestFocus()
+            showKeyboard(input)
+        }
+        input.setOnFocusChangeListener { view, hasFocus ->
+            if (hasFocus && dialog.isShowing) showKeyboard(view)
+        }
+        resultsList.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) {
+                hideKeyboard(input)
+                input.clearFocus()
+            }
+            false
+        }
+        resultsList.setOnItemClickListener { _, _, position, _ ->
+            val selected = suggestionItems.getOrNull(position) ?: return@setOnItemClickListener
+            if (selected.suggestAction == SuggestItem.Action.SUBSTITUTE) {
+                val replacement = selected.suggestText.ifEmpty { selected.title }
+                input.setText(replacement)
+                input.setSelection(input.text.length)
+                input.error = null
+                input.requestFocus()
+                showKeyboard(input)
+                scheduleSearch(immediate = true)
+                return@setOnItemClickListener
+            }
+            val point = selected.point ?: run {
+                searchAddressSuggestions(
+                    selected.suggestText.ifEmpty { selected.title },
+                    onResults = { resolved ->
+                        val resolvedPoint = resolved.firstNotNullOfOrNull(AddressSearchResult::point)
+                        if (resolvedPoint == null) {
+                            input.error = "Для объекта не найдены координаты"
+                        } else {
+                            dialog.dismiss()
+                            buildRouteTo(resolvedPoint)
+                        }
+                    },
+                    onError = { input.error = it },
+                )
+                return@setOnItemClickListener
+            }
+            dialog.dismiss()
+            buildRouteTo(point)
+        }
+        dialog.setOnDismissListener {
+            pendingSearch?.let(input::removeCallbacks)
+            pendingSearch = null
+            cancelAddressSearch()
+        }
         dialog.show()
         styleRoundedDialog(dialog)
         input.requestFocus()
-        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
     }
 
-    private fun searchAddress(query: String) {
+    private fun hideKeyboard(view: View) {
+        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
+    private fun showKeyboard(view: View) {
+        view.post {
+            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun requestAddressSuggestions(
+        query: String,
+        onResults: (List<AddressSearchResult>) -> Unit,
+        onError: (String) -> Unit,
+    ) {
         val location = latestSnapshot
         if (!location.hasLocation()) {
-            Toast.makeText(this, "Дождитесь определения координат GPS", Toast.LENGTH_SHORT).show()
+            onError("Дождитесь определения координат GPS")
+            return
+        }
+        addressSearchRequestId++
+        addressSearchSessions.forEach(Session::cancel)
+        addressSearchSessions.clear()
+        addressSearchListeners.clear()
+        val currentRequestId = addressSearchRequestId
+        val start = Point(location.latitude, location.longitude)
+        try {
+            val manager = addressSearchManager ?: SearchFactory.getInstance()
+                .createSearchManager(SearchManagerType.ONLINE)
+                .also { addressSearchManager = it }
+            val session = addressSuggestSession ?: manager.createSuggestSession()
+                .also { addressSuggestSession = it }
+            val options = SuggestOptions()
+                .setSuggestTypes(SuggestType.GEO.value)
+                .setUserPosition(start)
+                .setSuggestWords(true)
+                .setStrictBounds(false)
+            val listener = object : SuggestSession.SuggestListener {
+                override fun onResponse(response: SuggestResponse) {
+                    runOnUiThread {
+                        if (currentRequestId != addressSearchRequestId || isFinishing || isDestroyed) {
+                            return@runOnUiThread
+                        }
+                        onResults(extractSuggestResults(response.items, start))
+                    }
+                }
+
+                override fun onError(error: Error) {
+                    deliverAddressSearchError(currentRequestId, onError)
+                }
+            }
+            addressSuggestListener = listener
+            session.suggest(query, addressSuggestWindow(start), options, listener)
+        } catch (_: RuntimeException) {
+            deliverAddressSearchError(currentRequestId, onError)
+        } catch (_: LinkageError) {
+            deliverAddressSearchError(currentRequestId, onError)
+        }
+    }
+
+    private fun addressSuggestWindow(start: Point): BoundingBox {
+        val region = runCatching { mapView?.mapWindow?.map?.visibleRegion }.getOrNull()
+            ?: return BoundingBox(
+                Point(start.latitude - ADDRESS_SUGGEST_RADIUS_DEGREES, start.longitude - ADDRESS_SUGGEST_RADIUS_DEGREES),
+                Point(start.latitude + ADDRESS_SUGGEST_RADIUS_DEGREES, start.longitude + ADDRESS_SUGGEST_RADIUS_DEGREES),
+            )
+        val points = listOf(region.topLeft, region.topRight, region.bottomLeft, region.bottomRight)
+        return BoundingBox(
+            Point(points.minOf { it.latitude }, points.minOf { it.longitude }),
+            Point(points.maxOf { it.latitude }, points.maxOf { it.longitude }),
+        )
+    }
+
+    private fun extractSuggestResults(
+        items: List<SuggestItem>,
+        start: Point,
+    ): List<AddressSearchResult> = items.map { item ->
+        val point = item.center
+        val title = item.title.text.trim()
+            .ifEmpty { item.displayText.orEmpty().trim() }
+            .ifEmpty { item.searchText.orEmpty().trim() }
+            .ifEmpty { "Объект на карте" }
+        AddressSearchResult(
+            title = title,
+            subtitle = item.subtitle?.text.orEmpty().trim().takeUnless { it == title }.orEmpty(),
+            distanceMeters = point?.let { distanceMeters(start, it) }
+                ?: item.distance?.value
+                ?: Double.POSITIVE_INFINITY,
+            point = point,
+            suggestAction = item.action,
+            suggestText = when (item.action) {
+                SuggestItem.Action.SUBSTITUTE -> item.displayText
+                else -> item.searchText
+            }.orEmpty().trim(),
+        )
+    }
+
+    private fun searchAddressSuggestions(
+        query: String,
+        onResults: (List<AddressSearchResult>) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val location = latestSnapshot
+        if (!location.hasLocation()) {
+            onError("Дождитесь определения координат GPS")
             return
         }
         cancelAddressSearch()
         val currentRequestId = addressSearchRequestId
-        routeStatusView.text = "Ищем адрес…"
-        routeStatusView.visibility = View.VISIBLE
         val start = Point(location.latitude, location.longitude)
-        val listener = object : Session.SearchListener {
-            override fun onSearchResponse(response: Response) {
-                runOnUiThread {
-                    if (currentRequestId != addressSearchRequestId || isFinishing || isDestroyed) {
-                        return@runOnUiThread
-                    }
-                    addressSearchSession = null
-                    addressSearchListener = null
-                    renderRoute((application as GpsAntiRadarApplication).routeManager().snapshot)
-                    val results = extractAddressResults(response)
-                    if (results.isEmpty()) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Адрес не найден. Уточните запрос.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    } else {
-                        showAddressSearchResults(results)
-                    }
-                }
-            }
-
-            override fun onSearchError(error: Error) {
-                showAddressSearchError(currentRequestId)
-            }
-        }
-        addressSearchListener = listener
         try {
             val manager = addressSearchManager ?: SearchFactory.getInstance()
                 .createSearchManager(SearchManagerType.ONLINE)
                 .also { addressSearchManager = it }
             val options = SearchOptions()
                 .setSearchTypes(SearchType.GEO.value)
-                .setResultPageSize(8)
+                .setResultPageSize(ADDRESS_RESULT_PAGE_SIZE)
                 .setGeometry(true)
                 .setUserPosition(start)
-            addressSearchSession = manager.submit(
+            val listener = object : Session.SearchListener {
+                override fun onSearchResponse(response: Response) {
+                    runOnUiThread {
+                        if (currentRequestId != addressSearchRequestId || isFinishing || isDestroyed) {
+                            return@runOnUiThread
+                        }
+                        addressSearchSessions.clear()
+                        addressSearchListeners.clear()
+                        onResults(extractSearchResults(response, start))
+                    }
+                }
+
+                override fun onSearchError(error: Error) {
+                    deliverAddressSearchError(currentRequestId, onError)
+                }
+            }
+            addressSearchListeners += listener
+            addressSearchSessions += manager.submit(
                 query,
                 Geometry.fromPoint(start),
                 options,
                 listener,
             )
         } catch (_: RuntimeException) {
-            showAddressSearchError(currentRequestId)
+            deliverAddressSearchError(currentRequestId, onError)
         } catch (_: LinkageError) {
-            showAddressSearchError(currentRequestId)
+            deliverAddressSearchError(currentRequestId, onError)
         }
     }
 
-    private fun extractAddressResults(response: Response): List<AddressSearchResult> =
-        response.collection.children.asSequence()
+    private fun extractSearchResults(
+        response: Response,
+        start: Point,
+    ): List<AddressSearchResult> {
+        return response.collection.children.asSequence()
             .mapNotNull { it.obj }
-            .mapNotNull { geoObject ->
+            .map { geoObject ->
+                val metadata = geoObject.metadataContainer
+                    .getItem(ToponymObjectMetadata::class.java)
                 val point = geoObject.geometry.asSequence()
                     .mapNotNull { geometry -> runCatching { geometry.point }.getOrNull() }
-                    .firstOrNull() ?: return@mapNotNull null
-                val title = listOfNotNull(geoObject.name, geoObject.descriptionText)
-                    .map(String::trim)
-                    .filter(String::isNotEmpty)
-                    .distinct()
-                    .joinToString(", ")
-                    .ifEmpty { "Точка на карте" }
-                AddressSearchResult(title, point)
+                    .firstOrNull() ?: metadata?.balloonPoint
+                val formattedAddress = metadata?.address?.formattedAddress?.trim().orEmpty()
+                val title = formattedAddress
+                    .ifEmpty { geoObject.name?.trim().orEmpty() }
+                    .ifEmpty { "Объект на карте" }
+                val subtitle = geoObject.descriptionText?.trim().orEmpty()
+                    .takeUnless { it == title }
+                    .orEmpty()
+                AddressSearchResult(
+                    title = title,
+                    subtitle = subtitle,
+                    distanceMeters = point?.let { distanceMeters(start, it) }
+                        ?: Double.POSITIVE_INFINITY,
+                    point = point,
+                )
             }
-            .distinctBy { result -> result.point.latitude to result.point.longitude }
-            .take(8)
             .toList()
-
-    private fun showAddressSearchResults(results: List<AddressSearchResult>) {
-        val dialog = AlertDialog.Builder(this, dialogTheme())
-            .setTitle("Выберите конечный адрес")
-            .setItems(results.map { it.title }.toTypedArray()) { _, index ->
-                buildRouteTo(results[index].point)
-            }
-            .setNegativeButton("Отмена", null)
-            .create()
-        dialog.show()
-        styleRoundedDialog(dialog)
     }
 
-    private fun showAddressSearchError(requestId: Long) {
+    private fun distanceMeters(from: Point, to: Point): Double {
+        val fromLatitude = Math.toRadians(from.latitude)
+        val toLatitude = Math.toRadians(to.latitude)
+        val latitudeDelta = toLatitude - fromLatitude
+        val longitudeDelta = Math.toRadians(to.longitude - from.longitude)
+        val haversine = sin(latitudeDelta / 2).let { it * it } +
+            cos(fromLatitude) * cos(toLatitude) *
+            sin(longitudeDelta / 2).let { it * it }
+        return EARTH_RADIUS_METERS * 2 * atan2(sqrt(haversine), sqrt(1 - haversine))
+    }
+
+    private fun formatAddressDistance(distanceMeters: Double): String =
+        if (!distanceMeters.isFinite()) {
+            ""
+        } else if (distanceMeters < 1_000) {
+            "${distanceMeters.roundToInt()} м"
+        } else {
+            String.format(Locale.getDefault(), "%.1f км", distanceMeters / 1_000)
+        }
+
+    private fun deliverAddressSearchError(requestId: Long, onError: (String) -> Unit) {
         runOnUiThread {
             if (requestId != addressSearchRequestId || isFinishing || isDestroyed) {
                 return@runOnUiThread
             }
-            addressSearchSession = null
-            addressSearchListener = null
-            renderRoute((application as GpsAntiRadarApplication).routeManager().snapshot)
-            Toast.makeText(
-                this@MainActivity,
-                "Не удалось найти адрес. Проверьте интернет.",
-                Toast.LENGTH_LONG,
-            ).show()
+            onError("Не удалось найти адрес. Проверьте интернет.")
         }
     }
 
     private fun cancelAddressSearch() {
         addressSearchRequestId++
-        addressSearchSession?.cancel()
-        addressSearchSession = null
-        addressSearchListener = null
+        addressSuggestSession?.reset()
+        addressSuggestSession = null
+        addressSuggestListener = null
+        addressSearchSessions.forEach(Session::cancel)
+        addressSearchSessions.clear()
+        addressSearchListeners.clear()
     }
 
     private fun showQuickAddUserObjectDialog(position: Point) {
@@ -786,6 +1125,14 @@ class MainActivity : Activity() {
             "Ограничение скорости", 0, 300, 1, existing.currentSpeedLimit(),
         ) { if (it == 0) "нет" else "$it км/ч" }
         form.addView(speedControl.first, LinearLayout.LayoutParams(-1, dp(76)))
+        val draggingLockedSwitch = Switch(this).apply {
+            text = "Запретить перетаскивание долгим нажатием"
+            textSize = scaledSp(14)
+            setTextColor(primaryTextColor())
+            isChecked = existing.draggingLocked
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        form.addView(draggingLockedSwitch, LinearLayout.LayoutParams(-1, dp(58)))
 
         val scroll = ScrollView(this).apply { addView(form, FrameLayout.LayoutParams(-1, -2)) }
         val dialog = AlertDialog.Builder(this, dialogTheme())
@@ -813,6 +1160,7 @@ class MainActivity : Activity() {
                     } else {
                         ""
                     }
+                    draggingLocked = draggingLockedSwitch.isChecked
                 }
                 Thread({
                     val saved = runCatching {
@@ -1748,6 +2096,8 @@ class MainActivity : Activity() {
         applyControlTheme(zoomInButtonView, false)
         applyControlTheme(zoomOutButtonView, false)
         applyControlTheme(positionButtonView, true)
+        applyControlTheme(trafficButtonView, true)
+        updateTrafficButtonStyle(isTrafficVisible())
         cameraHintView.setTextColor(primaryTextColor())
         cameraHintView.background = roundedBackground(hintSurfaceColor(), 10)
         if (::routeStatusView.isInitialized) {
@@ -1767,6 +2117,23 @@ class MainActivity : Activity() {
         button ?: return
         tintIcon(button)
         if (withSurface) button.background = roundedBackground(controlSurfaceColor(), 7)
+    }
+
+    private fun isTrafficVisible(): Boolean = settingsPreferences.getBoolean(
+        AppSettings.TRAFFIC_VISIBLE,
+        AppSettings.DEFAULT_TRAFFIC_VISIBLE,
+    )
+
+    private fun applyTrafficVisibility(visible: Boolean) {
+        routeMapLayer?.setTrafficVisible(visible)
+        trafficLayer?.takeIf { it.isValid }?.setTrafficVisible(visible)
+        if (::trafficButtonView.isInitialized) updateTrafficButtonStyle(visible)
+    }
+
+    private fun updateTrafficButtonStyle(visible: Boolean) {
+        trafficButtonView.contentDescription = if (visible) "Скрыть пробки" else "Показать пробки"
+        trafficButtonView.alpha = if (visible) 1f else 0.55f
+        trafficButtonView.clearColorFilter()
     }
 
     private fun renderRoute(snapshot: RouteSnapshot) {
@@ -2126,6 +2493,7 @@ class MainActivity : Activity() {
         cancelAddressSearch()
         routeMapLayer?.destroy()
         routeMapLayer = null
+        trafficLayer = null
         cameraMapLayer?.destroy()
         cameraMapLayer = null
         mapView?.destroy()
@@ -2142,5 +2510,10 @@ class MainActivity : Activity() {
             AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD
         private const val HINT_ANIMATION_MS = 220L
         private const val THEME_REFRESH_MS = 60_000L
+        private const val ADDRESS_SEARCH_MIN_LENGTH = 3
+        private const val ADDRESS_SEARCH_DEBOUNCE_MS = 400L
+        private const val ADDRESS_RESULT_PAGE_SIZE = 50
+        private const val ADDRESS_SUGGEST_RADIUS_DEGREES = 0.25
+        private const val EARTH_RADIUS_METERS = 6_371_000.0
     }
 }

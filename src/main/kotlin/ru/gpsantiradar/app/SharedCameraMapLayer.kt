@@ -101,7 +101,9 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     private val placemarkDragListener = object : MapObjectDragListener {
         override fun onMapObjectDragStart(mapObject: MapObject) {
             val camera = mapObject.userData as? CameraPoint
-            if (!destroyed && camera?.userDefined == true && mapObject is PlacemarkMapObject) {
+            if (!destroyed && camera?.userDefined == true && !camera.draggingLocked &&
+                mapObject is PlacemarkMapObject
+            ) {
                 draggingUserCamera = true
                 pauseFollowing()
             }
@@ -117,7 +119,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
             val camera = mapObject.userData as? CameraPoint
             val position = (mapObject as? PlacemarkMapObject)?.geometry
             draggingUserCamera = false
-            if (!destroyed && camera?.userDefined == true && position != null) {
+            if (!destroyed && camera?.userDefined == true && !camera.draggingLocked && position != null) {
                 host?.onUserCameraMoved(camera, position)
             }
         }
@@ -138,7 +140,7 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         override fun onMapTap(map: com.yandex.mapkit.map.Map, point: Point) = Unit
 
         override fun onMapLongTap(map: com.yandex.mapkit.map.Map, point: Point) {
-            if (!destroyed && !draggingUserCamera && !isDraggableUserCameraAt(point)) {
+            if (!destroyed && !draggingUserCamera && !isUserCameraAt(point)) {
                 host?.onMapLongPressed(point)
             }
         }
@@ -518,13 +520,13 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
     }
 
     private fun configureUserCameraDragging(marker: PlacemarkMapObject, camera: CameraPoint) {
-        val enabled = camera.userDefined && host?.userCameraDraggingEnabled() == true
+        val enabled = camera.userDefined && !camera.draggingLocked &&
+            host?.userCameraDraggingEnabled() == true
         marker.isDraggable = enabled
         if (enabled) marker.setDragListener(placemarkDragListenerReference)
     }
 
-    private fun isDraggableUserCameraAt(point: Point): Boolean {
-        if (host?.userCameraDraggingEnabled() != true) return false
+    private fun isUserCameraAt(point: Point): Boolean {
         val activeWindow = mapWindow ?: return false
         val pressed = activeWindow.worldToScreen(point) ?: return false
         val radius = dp(32f)

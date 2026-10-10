@@ -14,6 +14,7 @@ object AppSettings {
     const val ZONE_DISPLAY_MODE = "zone_display_mode"
     const val ZONE_OBJECT_SCOPE = "zone_object_scope"
     const val AUTO_ROTATE_MAP = "auto_rotate_map"
+    const val TRAFFIC_VISIBLE = "traffic_visible"
     const val LOCATION_ARROW_SCALE = "location_arrow_scale_tenths"
     const val UI_SCALE_PERCENT = "ui_scale_percent"
     const val MAP_SCALE_PERCENT = "map_scale_percent"
@@ -28,6 +29,7 @@ object AppSettings {
     const val OVERSPEED_THRESHOLD_STEP_KMH = 1
     const val DEFAULT_HUD_TRANSPARENCY_PERCENT = 10
     const val DEFAULT_AUTO_ROTATE_MAP = false
+    const val DEFAULT_TRAFFIC_VISIBLE = true
     const val DEFAULT_LOCATION_ARROW_SCALE_TENTHS = 10
     const val MIN_LOCATION_ARROW_SCALE_TENTHS = 10
     const val MAX_LOCATION_ARROW_SCALE_TENTHS = 20
