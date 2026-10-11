@@ -73,7 +73,12 @@ class RouteManager {
         runOnMain { listeners.remove(listener) }
     }
 
-    fun buildRoute(start: Point, destination: Point, initialAzimuth: Double? = null) {
+    fun buildRoute(
+        start: Point,
+        destination: Point,
+        initialAzimuth: Double? = null,
+        destinationLabel: String = "",
+    ) {
         runOnMain {
             activeSession?.cancel()
             activeSession = null
@@ -88,6 +93,7 @@ class RouteManager {
                     requestId = routeId,
                     status = RouteStatus.BUILDING,
                     destination = destination,
+                    destinationLabel = destinationLabel,
                 ),
             )
             requestRoute(start, destination, initialAzimuth, routeId, replacingActiveRoute = false)
@@ -306,6 +312,7 @@ class RouteManager {
                 .map { it.jamType }
                 .toList(),
             destination = destination,
+            destinationLabel = snapshot.destinationLabel,
             distanceText = weight.distance.text,
             durationText = weight.timeWithTraffic.text,
         )
@@ -362,6 +369,7 @@ class RouteManager {
                 requestId = routeId,
                 status = RouteStatus.ERROR,
                 destination = destination,
+                destinationLabel = snapshot.destinationLabel,
                 errorMessage = "Не удалось построить маршрут. Проверьте интернет.",
             ),
         )

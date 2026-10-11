@@ -60,12 +60,13 @@ import java.lang.reflect.Method
  class CarTemplateTest {
 @Test
 fun releaseMetadataDescribesCurrentChanges() {
-assertEquals("4.9.19", BuildConfig.VERSION_NAME)
+assertEquals("4.9.20", BuildConfig.VERSION_NAME)
 val release = ReleaseHistory.find(BuildConfig.VERSION_NAME)
 assertTrue(release != null)
-assertTrue(release!!.changes.contains("пешеходном переходе"))
-assertTrue(release!!.changes.contains("звуковой сигнал превышения"))
-assertTrue(release!!.changes.contains("правый верхний угол"))
+assertTrue(release!!.changes.contains("2D/3D"))
+assertTrue(release!!.changes.contains("маршрут"))
+assertTrue(release!!.changes.contains("раза в час"))
+assertTrue(release!!.changes.contains("масштаб интерфейса"))
 }
 
 @Test @Throws(Exception::class)
@@ -132,6 +133,24 @@ assertEquals(Color.rgb(18, 18, 18),
 val distance = findText(root, "—")
 assertTrue(distance != null)
 assertEquals(Color.rgb(238, 238, 238), distance!!.getCurrentTextColor())
+activity!!.finish()
+}
+
+@Test @Throws(Exception::class)
+fun radarBaseToastTextUsesInterfaceScale() {
+val context = ApplicationProvider.getApplicationContext<Context>()
+context!!.getSharedPreferences(AppSettings.PREFERENCES, Context.MODE_PRIVATE)
+.edit().clear().putInt(AppSettings.UI_SCALE_PERCENT, 200).commit()
+val activity = Robolectric.buildActivity(MainActivity::class.java).create().get()
+val factory = MainActivity::class.java!!.getDeclaredMethod(
+"radarBaseToastView", String::class.java)
+factory!!.setAccessible(true)
+val toastText = factory!!.invoke(activity, "Обновление базы") as TextView
+val scaledDensity = TypedValue.applyDimension(
+TypedValue.COMPLEX_UNIT_SP, 1f, activity!!.resources.displayMetrics)
+
+assertEquals("Обновление базы", toastText!!.getText().toString())
+assertEquals(28f, toastText!!.getTextSize() / scaledDensity, 0.01f)
 activity!!.finish()
 }
 

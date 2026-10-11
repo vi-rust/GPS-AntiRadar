@@ -344,6 +344,20 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         zoomBy(delta, null)
     }
 
+    /** Switches between a flat map and a tilted perspective without changing its viewport. */
+    fun toggleMapDimension(): Boolean? {
+        val activeMap = map
+        if (destroyed || activeMap == null) return null
+        val current = activeMap.cameraPosition
+        val enable3d = current.tilt < MAP_3D_TILT_THRESHOLD
+        val nextTilt = if (enable3d) MAP_3D_TILT else 0f
+        activeMap.move(
+            CameraPosition(current.target, current.zoom, current.azimuth, nextTilt),
+            Animation(Animation.Type.SMOOTH, 0.35f),
+        )
+        return enable3d
+    }
+
     /** Handles projected-surface clicks because they are not dispatched to MapView. */
     fun tapCameraAt(x: Float, y: Float): Boolean {
         val window = mapWindow
@@ -986,6 +1000,8 @@ class SharedCameraMapLayer(context: Context?, mapWindow: MapWindow?, host: Host?
         private const val MAX_VISIBLE_MARKERS = 5000
         private const val COVERAGE_MIN_ZOOM = 13f
         private const val FOLLOW_PAUSE_MS = 7000L
+        private const val MAP_3D_TILT = 45f
+        private const val MAP_3D_TILT_THRESHOLD = 1f
         private val GREEN = Color.rgb(0, 166, 82)
         private val USER_MARKER_OUTLINE = Color.rgb(0, 150, 255)
     }

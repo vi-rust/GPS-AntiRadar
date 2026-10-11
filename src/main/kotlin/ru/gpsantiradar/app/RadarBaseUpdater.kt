@@ -22,10 +22,10 @@ class RadarBaseUpdater(context: Context, private val gate: RadarBaseUpdateSingle
 
     fun requestUpdate() {
         if (!gate.tryStart()) {
-            publish(RadarBaseUpdateState.Status.ALREADY_RUNNING, 0, false, "Обновление базы RadarBase уже выполняется")
+            publish(RadarBaseUpdateState.Status.ALREADY_RUNNING, 0, false, "Обновление базы объектов уже выполняется")
             return
         }
-        publish(RadarBaseUpdateState.Status.STARTED, 0, false, "Обновление базы RadarBase начато")
+        publish(RadarBaseUpdateState.Status.STARTED, 0, false, "Обновление базы объектов начато")
         Thread(::updateInBackground, "radarbase-download").start()
     }
     fun latestState() = listenerRegistry.latestState()
@@ -46,10 +46,10 @@ class RadarBaseUpdater(context: Context, private val gate: RadarBaseUpdateSingle
             preferences.getString(RADARBASE_MODIFIED, "")?.takeIf { it.isNotEmpty() }?.let { connection.setRequestProperty("If-Modified-Since", it) }
             val status = connection.responseCode
             if (status == HttpURLConnection.HTTP_NOT_MODIFIED) {
-                publish(RadarBaseUpdateState.Status.UNCHANGED, 0, false, "База RadarBase уже актуальна")
+                publish(RadarBaseUpdateState.Status.UNCHANGED, 0, false, "База объектов уже актуальна")
                 return
             }
-            if (status != HttpURLConnection.HTTP_OK) throw IOException("Сервер RadarBase: HTTP $status")
+            if (status != HttpURLConnection.HTTP_OK) throw IOException("Сервер базы объектов: HTTP $status")
             val raw = connection.inputStream
             val input = if (connection.contentEncoding.equals("gzip", true)) GZIPInputStream(raw) else raw
             val result = input.use { source -> CameraDatabase(context).use { it.importRadarBase(source) } }
@@ -65,7 +65,7 @@ class RadarBaseUpdater(context: Context, private val gate: RadarBaseUpdateSingle
             publish(RadarBaseUpdateState.Status.SUCCESS, result.count, result.coordinatesCorrected, "Импортировано: ${result.count}$suffix")
         } catch (error: Exception) {
             publish(RadarBaseUpdateState.Status.ERROR, 0, false,
-                error.message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить JSON RadarBase")
+                error.message?.takeIf { it.isNotBlank() } ?: "Не удалось загрузить JSON базы объектов")
         } finally {
             connection?.disconnect()
             gate.finish()

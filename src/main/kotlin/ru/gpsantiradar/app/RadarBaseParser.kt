@@ -59,12 +59,12 @@ object RadarBaseParser {
             }
             reader.endObject()
         } catch (error: IllegalStateException) {
-            throw IOException("Повреждённый JSON RadarBase", error)
+            throw IOException("Повреждённый JSON базы объектов", error)
         } catch (error: NumberFormatException) {
-            throw IOException("Повреждённый JSON RadarBase", error)
+            throw IOException("Повреждённый JSON базы объектов", error)
         }
-        if (!objectsSeen || count == 0) throw IOException("В JSON нет объектов RadarBase")
-        if (version.isNotEmpty() && !version.startsWith("3.")) throw IOException("Неподдерживаемая схема RadarBase $version")
+        if (!objectsSeen || count == 0) throw IOException("JSON базы объектов не содержит объектов")
+        if (version.isNotEmpty() && !version.startsWith("3.")) throw IOException("Неподдерживаемая схема базы объектов $version")
         return Result(count, version, exportDate, build, coordinatesCorrected)
     }
 

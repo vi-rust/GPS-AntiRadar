@@ -16,6 +16,7 @@ data class RouteSnapshot(
     val points: List<Point> = emptyList(),
     val jamTypes: List<JamType> = emptyList(),
     val destination: Point? = null,
+    val destinationLabel: String = "",
     val distanceText: String = "",
     val durationText: String = "",
     val errorMessage: String = "",

@@ -41,7 +41,8 @@ $RequiredSources = @(
     "AppSettings", "CameraDatabase", "CameraPoint", "DrivingHudPresentation",
     "DrivingSnapshot", "DrivingSnapshotIntent", "Geo", "GpsAntiRadarApplication",
     "MainActivity", "MapMarkerLayout", "MapVisualStyle", "RadarBaseParser",
-    "RadarBaseUpdater", "SharedCameraMapLayer", "StrelkaAlertAlgorithm",
+    "RadarBaseUpdater", "RadarBaseUpdatePolicy", "RadarBaseUpdateNotificationGate",
+    "SharedCameraMapLayer", "StrelkaAlertAlgorithm",
     "StrelkaAlertTracker", "StrelkaSoundPlayer", "TrackingService", "GpsCarAppService", "GpsCarSession",
     "CarSurfaceController", "CarMapPresentation", "CarMapGestureController",
     "CarMapScreen", "CarMenuScreen", "CarValueScreen",
@@ -80,6 +81,8 @@ if ($RouteMapLayerSource -match 'setStrokeColors\(emptyList\(\)\)') {
 $SoundPlayer = Read-Source "StrelkaSoundPlayer"
 $Activity = Read-Source "MainActivity"
 $Application = Read-Source "GpsAntiRadarApplication"
+$RadarBaseUpdater = Read-Source "RadarBaseUpdater"
+$RadarBaseUpdatePolicy = Read-Source "RadarBaseUpdatePolicy"
 $SharedMapLayer = Read-Source "SharedCameraMapLayer"
 $CarSession = Read-Source "GpsCarSession"
 $SurfaceController = Read-Source "CarSurfaceController"
@@ -102,12 +105,41 @@ if ($Activity -match '\u041C\u043E\u0438 \u043E\u0431\u044A\u0435\u043A\u0442\u0
     throw "The removed user-object menu item must not return"
 }
 Assert-Contains $Activity 'RadarBaseTypes\.allTypes\(\)' "User editor must expose every known object type"
-Assert-Contains $Activity '\u0417\u0430\u043F\u0440\u0435\u0442\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0442\u0430\u0441\u043A\u0438\u0432\u0430\u043D\u0438\u0435 \u0434\u043E\u043B\u0433\u0438\u043C \u043D\u0430\u0436\u0430\u0442\u0438\u0435\u043C' "User editor must expose the dragging lock"
+Assert-Contains $Activity '\u0417\u0430\u043F\u0440\u0435\u0442\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0442\u0430\u0441\u043A\u0438\u0432\u0430\u043D\u0438\u0435' "User editor must expose the concise dragging lock label"
+if ($Activity -match '\u0417\u0430\u043F\u0440\u0435\u0442\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0442\u0430\u0441\u043A\u0438\u0432\u0430\u043D\u0438\u0435 \u0434\u043E\u043B\u0433\u0438\u043C \u043D\u0430\u0436\u0430\u0442\u0438\u0435\u043C') {
+    throw "The obsolete long-press dragging label must not return"
+}
+Assert-Contains $RadarBaseUpdater '\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0431\u0430\u0437\u044B \u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432 \u0443\u0436\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F' "Repeated update message must name the object database"
+Assert-Contains $RadarBaseUpdater '\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0431\u0430\u0437\u044B \u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u043E' "Started update message must name the object database"
+Assert-Contains $RadarBaseUpdater '\u0411\u0430\u0437\u0430 \u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432 \u0443\u0436\u0435 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u0430' "Unchanged update message must name the object database"
+Assert-Contains $RadarBaseUpdater '\u0421\u0435\u0440\u0432\u0435\u0440 \u0431\u0430\u0437\u044B \u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432: HTTP' "Server error must use the correct object-database case"
+Assert-Contains $RadarBaseUpdater '\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C JSON \u0431\u0430\u0437\u044B \u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432' "Download error must use the correct object-database case"
 Assert-Contains $Activity 'R\.drawable\.ic_traffic' "Phone map must expose the traffic toggle button"
 Assert-Contains $Activity 'putBoolean\(AppSettings\.TRAFFIC_VISIBLE, visible\)' "Traffic choice must be persisted"
 Assert-Contains $Activity 'trafficButtonView\.clearColorFilter\(\)' "Multicolor traffic icon must retain its road-condition colors"
 Assert-Contains $Activity 'val trafficParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(58\), dp\(6\), 0\)' "Traffic button must sit directly below the top-right menu button"
-Assert-Contains $Activity 'val positionParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(110\), dp\(6\), 0\)' "Location button must sit below the top-right traffic button"
+Assert-Contains $Activity 'val positionParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(162\), dp\(6\), 0\)' "Location button must sit below the top-right 2D/3D button"
+Assert-Contains $Activity 'mapModeButtonView = Button\(this\)' "Phone map must expose the 2D/3D toggle button"
+Assert-Contains $Activity 'cameraMapLayer\?\.toggleMapDimension\(\)' "The 2D/3D button must control the shared map camera"
+Assert-Contains $Activity 'val mapModeParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(110\), dp\(6\), 0\)' "The 2D/3D button must sit directly above the location button"
+Assert-Contains $Activity 'zoomControlsView\.translationY = view\.height \* 0\.25f' "Zoom controls must sit 25 percent of the screen height above the bottom"
+Assert-Contains $SharedMapLayer 'fun toggleMapDimension\(\): Boolean\?' "Shared map must support switching between flat and perspective views"
+Assert-Contains $SharedMapLayer 'CameraPosition\(current\.target, current\.zoom, current\.azimuth, nextTilt\)' "2D/3D switching must preserve the current map viewport"
+Assert-Contains $Activity 'routeButtonView = iconButton\(R\.drawable\.ic_route_search' "Phone map must expose address route search"
+Assert-Contains $Activity 'val routeButtonParams = FrameLayout\.LayoutParams\([\s\S]*?setMargins\(0, dp\(214\), dp\(6\), 0\)' "Route search must sit below the location button"
+Assert-Contains $Activity 'snapshot\.status == RouteStatus\.READY\)[\s\S]*?showRouteInfoDialog\(\)[\s\S]*?else[\s\S]*?showAddressRouteDialog\(\)' "The active route button must show route information instead of replacing it immediately"
+if ($Activity -match 'override fun onMapTapped') {
+    throw "Short map taps must not open route information"
+}
+Assert-Contains $Activity 'private fun showRouteInfoDialog\(\)[\s\S]*?destinationLabel[\s\S]*?setPositiveButton[\s\S]*?setNeutralButton[\s\S]*?setNegativeButton' "Route information must show its destination and three actions"
+Assert-Contains $Activity 'if \(active\) GREEN else controlSurfaceColor\(\)' "An active route must highlight its map button"
+Assert-Contains $RouteManagerSource 'destinationLabel = destinationLabel' "Route building must retain the selected address"
+if ($Activity -match 'val addressRoute = menuAction' -or $Activity -match 'val routeReset =') {
+    throw "Route creation and reset actions must not return to the map menu"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $Project 'res\drawable\ic_route_search.xml'))) {
+    throw "Route search drawable is missing"
+}
 Assert-Contains $Activity 'createTrafficLayer\(view\.mapWindow\)' "Traffic toggle must control the full phone map traffic layer"
 Assert-Contains $Activity 'trafficLayer\?\.takeIf \{ it\.isValid \}\?\.setTrafficVisible\(visible\)' "Phone traffic layer must follow the persisted toggle safely"
 Assert-Contains $CarPresentation 'createTrafficLayer\(mapWindow\)' "Traffic toggle must control the full Android Auto map traffic layer"
@@ -239,6 +271,9 @@ Assert-Contains $Activity 'val input = EditText\(this\)\.apply \{[\s\S]*?textSiz
 Assert-Contains $Activity 'textSize = scaledSp\(22\)' "Slider step button text must use the UI text scale"
 Assert-Contains $Activity 'BUTTON_NEUTRAL\)\?\.textSize = scaledSp\(14\)' "Every dialog action button must use the UI text scale"
 Assert-Contains $Activity 'messageId\)\?\.textSize = scaledSp\(16\)' "Dialog messages must use the UI text scale"
+Assert-Contains $Activity 'shouldShowPhoneRadarBaseUpdate\(state\)' "Phone must suppress replayed RadarBase notifications"
+Assert-Contains $Activity 'private fun radarBaseToastView\(message: String\): TextView' "RadarBase notifications must use a scalable text view"
+Assert-Contains $Activity 'text\(message, 14, Color\.WHITE, Typeface\.NORMAL\)' "RadarBase notification text must follow the UI scale"
 if (([regex]::Matches($Activity, 'scaleType = ImageView\.ScaleType\.FIT_CENTER')).Count -lt 2) {
     throw "Main-screen action icons must scale with their button bounds"
 }
@@ -264,7 +299,11 @@ Assert-Contains $Activity 'FrameLayout\.LayoutParams\(dp\(203\)' "Phone HUD widt
 Assert-Contains $Activity 'setPadding\(dp\(4\), dp\(4\), 0, 0\)' "Phone HUD must use a minimal non-zero inset"
 
 Assert-Contains $Application 'RadarBaseUpdateSingleFlight\(' "Application must own the process update guard"
-Assert-Contains $Application 'radarBaseUpdater\.requestUpdate\(\)' "Application must request the cold-start update"
+Assert-Contains $Application 'RadarBaseUpdatePolicy\.shouldRequestUpdateOnApplicationStart' "Application startup must follow the update interval policy"
+Assert-Contains $Application 'RadarBaseUpdatePolicy\.shouldRequestUpdateOnApplicationStart\([\s\S]*?radarBaseUpdater\.requestUpdate\(\)' "Only an eligible application startup may request an update"
+Assert-Contains $RadarBaseUpdatePolicy 'STARTUP_UPDATE_INTERVAL_MS\s*=\s*60L \* 60L \* 1000L' "Application startup must wait one hour after a successful download"
+Assert-Contains $Activity 'radarBaseUpdater\(\)\.requestUpdate\(\)' "Phone manual updates must bypass the startup interval"
+Assert-Contains $CarMenu 'updater\.requestUpdate\(\)' "Car manual updates must bypass the startup interval"
 Assert-Contains $Application 'MapKitLifecycle\(' "Application must own MapKit lifecycle"
 
 Assert-Contains $CarSession 'CarStartupDecision\.from' "Car startup must separate radar and map readiness"
@@ -318,8 +357,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*54' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'appVersionName\s*=\s*"4\.9\.19"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*55' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'appVersionName\s*=\s*"4\.9\.20"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

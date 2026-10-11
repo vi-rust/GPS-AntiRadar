@@ -98,6 +98,8 @@ class MainActivity : Activity() {
     private lateinit var zoomOutButtonView: ImageButton
     private lateinit var positionButtonView: ImageButton
     private lateinit var trafficButtonView: ImageButton
+    private lateinit var routeButtonView: ImageButton
+    private lateinit var mapModeButtonView: Button
     private lateinit var cameraHintView: TextView
     private lateinit var routeStatusView: TextView
     private var mapView: MapView? = null
@@ -212,6 +214,9 @@ class MainActivity : Activity() {
 
     private val radarBaseUpdateListener = object : RadarBaseUpdater.Listener {
         override fun onRadarBaseUpdate(state: RadarBaseUpdateState) {
+            if (!(application as GpsAntiRadarApplication)
+                    .shouldShowPhoneRadarBaseUpdate(state)
+            ) return
             showRadarBaseUpdateState(state)
         }
     }
@@ -481,6 +486,9 @@ class MainActivity : Activity() {
         val zoomParams = FrameLayout.LayoutParams(dp(44), -2, Gravity.END or Gravity.CENTER_VERTICAL)
             .apply { setMargins(0, 0, dp(6), 0) }
         overlay.addView(zoomControlsView, zoomParams)
+        overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+            zoomControlsView.translationY = view.height * 0.25f
+        }
 
         positionButtonView = iconButton(R.drawable.ic_my_location, "Моя точка").apply {
             setOnClickListener { centerOnLocation() }
@@ -489,8 +497,47 @@ class MainActivity : Activity() {
             dp(44),
             dp(44),
             Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(110), dp(6), 0) }
+        ).apply { setMargins(0, dp(162), dp(6), 0) }
         overlay.addView(positionButtonView, positionParams)
+
+        routeButtonView = iconButton(R.drawable.ic_route_search, "Маршрут по адресу").apply {
+            setOnClickListener {
+                val snapshot = (application as GpsAntiRadarApplication).routeManager().snapshot
+                if (snapshot.status == RouteStatus.READY) {
+                    showRouteInfoDialog()
+                } else {
+                    showAddressRouteDialog()
+                }
+            }
+        }
+        val routeButtonParams = FrameLayout.LayoutParams(
+            dp(44),
+            dp(44),
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(214), dp(6), 0) }
+        overlay.addView(routeButtonView, routeButtonParams)
+
+        mapModeButtonView = Button(this).apply {
+            text = "2D"
+            textSize = scaledSp(12)
+            setTextColor(primaryTextColor())
+            isAllCaps = false
+            minWidth = 0
+            minHeight = 0
+            setPadding(0, 0, 0, 0)
+            background = roundedBackground(controlSurfaceColor(), 7)
+            elevation = dp(4).toFloat()
+            contentDescription = "Переключить карту в 3D"
+            setOnClickListener {
+                cameraMapLayer?.toggleMapDimension()?.let(::updateMapModeButton)
+            }
+        }
+        val mapModeParams = FrameLayout.LayoutParams(
+            dp(44),
+            dp(44),
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(110), dp(6), 0) }
+        overlay.addView(mapModeButtonView, mapModeParams)
 
         trafficButtonView = iconButton(R.drawable.ic_traffic, "Скрыть пробки").apply {
             setOnClickListener {
@@ -548,18 +595,14 @@ class MainActivity : Activity() {
     }
 
     private fun showRoutePointActionDialog(position: Point) {
-        val routeManager = (application as GpsAntiRadarApplication).routeManager()
-        val removeRoute = routeManager.snapshot.status == RouteStatus.READY &&
-            routeMapLayer?.isPointNearRoute(position, dp(30).toFloat()) == true
-        val primaryAction = if (removeRoute) "Удалить маршрут" else "Построить маршрут сюда"
-        val actions = arrayOf(primaryAction, "Добавить объект антирадара")
+        val actions = arrayOf("Построить маршрут сюда", "Добавить объект антирадара")
         val dialog = AlertDialog.Builder(this, dialogTheme())
             .setTitle("Действие с точкой")
             .setAdapter(
                 scaledTextAdapter(actions.toList(), android.R.layout.simple_list_item_1),
             ) { _, index ->
                 when (index) {
-                    0 -> if (removeRoute) routeManager.clearRoute() else buildRouteTo(position)
+                    0 -> buildRouteTo(position)
                     else -> showQuickAddUserObjectDialog(position)
                 }
             }
@@ -569,7 +612,7 @@ class MainActivity : Activity() {
         styleRoundedDialog(dialog)
     }
 
-    private fun buildRouteTo(destination: Point) {
+    private fun buildRouteTo(destination: Point, destinationLabel: String = "") {
         val snapshot = latestSnapshot
         if (!snapshot.hasLocation()) {
             Toast.makeText(
@@ -581,11 +624,14 @@ class MainActivity : Activity() {
         }
         val start = Point(snapshot.latitude, snapshot.longitude)
         val azimuth = snapshot.headingDegrees.takeIf(Float::isFinite)?.toDouble()
+        val resolvedLabel = destinationLabel.trim().ifEmpty {
+            String.format(Locale.US, "%.6f, %.6f", destination.latitude, destination.longitude)
+        }
         (application as GpsAntiRadarApplication).routeManager()
-            .buildRoute(start, destination, azimuth)
+            .buildRoute(start, destination, azimuth, resolvedLabel)
     }
 
-    private fun showAddressRouteDialog() {
+    private fun showAddressRouteDialog(initialQuery: String = "") {
         if (!mapInitialized) {
             Toast.makeText(this, "Яндекс-карта недоступна", Toast.LENGTH_SHORT).show()
             return
@@ -605,6 +651,10 @@ class MainActivity : Activity() {
             imeOptions = EditorInfo.IME_ACTION_DONE or
                 EditorInfo.IME_FLAG_NO_EXTRACT_UI or
                 EditorInfo.IME_FLAG_NO_FULLSCREEN
+            if (initialQuery.isNotBlank()) {
+                setText(initialQuery)
+                setSelection(text.length)
+            }
         }
         val suggestionItems = mutableListOf<AddressSearchResult>()
         val suggestionAdapter = object : BaseAdapter() {
@@ -766,12 +816,15 @@ class MainActivity : Activity() {
                 searchAddressSuggestions(
                     selected.suggestText.ifEmpty { selected.title },
                     onResults = { resolved ->
-                        val resolvedPoint = resolved.firstNotNullOfOrNull(AddressSearchResult::point)
-                        if (resolvedPoint == null) {
+                        val resolvedResult = resolved.firstOrNull { it.point != null }
+                        if (resolvedResult == null) {
                             input.error = "Для объекта не найдены координаты"
                         } else {
                             dialog.dismiss()
-                            buildRouteTo(resolvedPoint)
+                            buildRouteTo(
+                                requireNotNull(resolvedResult.point),
+                                addressLabel(resolvedResult),
+                            )
                         }
                     },
                     onError = { input.error = it },
@@ -779,7 +832,7 @@ class MainActivity : Activity() {
                 return@setOnItemClickListener
             }
             dialog.dismiss()
-            buildRouteTo(point)
+            buildRouteTo(point, addressLabel(selected))
         }
         dialog.setOnDismissListener {
             pendingSearch?.let(input::removeCallbacks)
@@ -793,6 +846,38 @@ class MainActivity : Activity() {
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
         )
+    }
+
+    private fun addressLabel(result: AddressSearchResult): String {
+        val title = result.title.trim()
+        val subtitle = result.subtitle.trim()
+        return if (subtitle.isEmpty() || subtitle.equals(title, ignoreCase = true)) {
+            title
+        } else {
+            "$title, $subtitle"
+        }
+    }
+
+    private fun showRouteInfoDialog() {
+        val routeManager = (application as GpsAntiRadarApplication).routeManager()
+        val snapshot = routeManager.snapshot
+        if (snapshot.status != RouteStatus.READY) return
+        val destination = snapshot.destinationLabel.ifBlank {
+            snapshot.destination?.let {
+                String.format(Locale.US, "%.6f, %.6f", it.latitude, it.longitude)
+            }.orEmpty()
+        }
+        val dialog = AlertDialog.Builder(this, dialogTheme())
+            .setTitle("Маршрут")
+            .setMessage(destination)
+            .setPositiveButton("Редактировать") { _, _ ->
+                showAddressRouteDialog(snapshot.destinationLabel)
+            }
+            .setNeutralButton("Удалить") { _, _ -> routeManager.clearRoute() }
+            .setNegativeButton("Закрыть", null)
+            .create()
+        dialog.show()
+        styleRoundedDialog(dialog)
     }
 
     private fun hideKeyboard(view: View) {
@@ -1129,7 +1214,7 @@ class MainActivity : Activity() {
         ) { if (it == 0) "нет" else "$it км/ч" }
         form.addView(speedControl.first, LinearLayout.LayoutParams(-1, dp(76)))
         val draggingLockedSwitch = Switch(this).apply {
-            text = "Запретить перетаскивание долгим нажатием"
+            text = "Запретить перетаскивание"
             textSize = scaledSp(14)
             setTextColor(primaryTextColor())
             isChecked = existing.draggingLocked
@@ -1323,15 +1408,6 @@ class MainActivity : Activity() {
         content.addView(mapScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
         content.addView(locationArrowScaleRow(), LinearLayout.LayoutParams(-1, dp(86)))
         content.addView(autoRotateRow(), LinearLayout.LayoutParams(-1, dp(54)))
-        val addressRoute = menuAction(R.drawable.ic_navigation, "Маршрут по адресу")
-        content.addView(addressRoute, LinearLayout.LayoutParams(-1, dp(54)))
-        val routeReset = if (
-            (application as GpsAntiRadarApplication).routeManager().snapshot.status != RouteStatus.IDLE
-        ) {
-            menuAction(R.drawable.ic_remove, "Сбросить маршрут").also {
-                content.addView(it, LinearLayout.LayoutParams(-1, dp(54)))
-            }
-        } else null
         val zoneDisplayMode = ZoneDisplayMode.fromStored(
             settingsPreferences.getString(AppSettings.ZONE_DISPLAY_MODE, ZoneDisplayMode.ALL.name),
         )
@@ -1364,14 +1440,6 @@ class MainActivity : Activity() {
         )
         val dialog = showMenuDialog("Карта", content, backToRoot = true)
         zoneDisplay.setOnClickListener { showZoneDisplayDialog(); dialog.dismiss() }
-        addressRoute.setOnClickListener {
-            dialog.dismiss()
-            showAddressRouteDialog()
-        }
-        routeReset?.setOnClickListener {
-            (application as GpsAntiRadarApplication).routeManager().clearRoute()
-            dialog.dismiss()
-        }
     }
 
     private fun showInterfaceMenu() {
@@ -2100,7 +2168,13 @@ class MainActivity : Activity() {
         applyControlTheme(zoomOutButtonView, false)
         applyControlTheme(positionButtonView, true)
         applyControlTheme(trafficButtonView, true)
+        applyControlTheme(routeButtonView, true)
+        mapModeButtonView.setTextColor(primaryTextColor())
+        mapModeButtonView.background = roundedBackground(controlSurfaceColor(), 7)
         updateTrafficButtonStyle(isTrafficVisible())
+        updateRouteButtonStyle(
+            (application as GpsAntiRadarApplication).routeManager().snapshot.status,
+        )
         cameraHintView.setTextColor(primaryTextColor())
         cameraHintView.background = roundedBackground(hintSurfaceColor(), 10)
         if (::routeStatusView.isInitialized) {
@@ -2139,8 +2213,32 @@ class MainActivity : Activity() {
         trafficButtonView.clearColorFilter()
     }
 
+    private fun updateRouteButtonStyle(status: RouteStatus) {
+        val active = status == RouteStatus.READY
+        routeButtonView.contentDescription = if (active) {
+            "Информация о маршруте"
+        } else {
+            "Маршрут по адресу"
+        }
+        routeButtonView.background = roundedBackground(
+            if (active) GREEN else controlSurfaceColor(),
+            7,
+        )
+        if (active) routeButtonView.setColorFilter(Color.WHITE) else tintIcon(routeButtonView)
+    }
+
+    private fun updateMapModeButton(is3d: Boolean) {
+        mapModeButtonView.text = if (is3d) "3D" else "2D"
+        mapModeButtonView.contentDescription = if (is3d) {
+            "Переключить карту в 2D"
+        } else {
+            "Переключить карту в 3D"
+        }
+    }
+
     private fun renderRoute(snapshot: RouteSnapshot) {
         routeMapLayer?.render(snapshot)
+        if (::routeButtonView.isInitialized) updateRouteButtonStyle(snapshot.status)
         if (!::routeStatusView.isInitialized) return
         when (snapshot.status) {
             RouteStatus.IDLE -> routeStatusView.visibility = View.GONE
@@ -2214,8 +2312,20 @@ class MainActivity : Activity() {
             state.status == RadarBaseUpdateState.Status.STARTED ||
             state.status == RadarBaseUpdateState.Status.ALREADY_RUNNING
         ) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-        Toast.makeText(this, state.message, duration).show()
+        Toast(this).apply {
+            this.duration = duration
+            view = radarBaseToastView(state.message)
+            setGravity(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, 0, dp(64))
+        }.show()
     }
+
+    private fun radarBaseToastView(message: String): TextView =
+        text(message, 14, Color.WHITE, Typeface.NORMAL).apply {
+            gravity = Gravity.CENTER
+            maxWidth = resources.displayMetrics.widthPixels - dp(48)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = roundedBackground(Color.argb(235, 45, 45, 45), 12)
+        }
 
     private fun refreshDatabaseCount() {
         Thread({

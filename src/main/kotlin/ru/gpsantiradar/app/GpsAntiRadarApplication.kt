@@ -10,17 +10,30 @@ class GpsAntiRadarApplication : Application() {
         override fun onStop() = MapKitFactory.getInstance().onStop()
     })
     private val radarBaseUpdateGuard = RadarBaseUpdateSingleFlight()
+    private val phoneRadarBaseNotificationGate = RadarBaseUpdateNotificationGate()
     private lateinit var radarBaseUpdater: RadarBaseUpdater
     private val routeManager = RouteManager()
 
     override fun onCreate() {
         super.onCreate()
         radarBaseUpdater = RadarBaseUpdater(this, radarBaseUpdateGuard)
-        radarBaseUpdater.requestUpdate()
+        val lastSuccessfulDownload = getSharedPreferences(
+            AppSettings.PREFERENCES,
+            MODE_PRIVATE,
+        ).getLong(AppSettings.RADARBASE_LAST_SUCCESSFUL_DOWNLOAD, 0L)
+        if (RadarBaseUpdatePolicy.shouldRequestUpdateOnApplicationStart(
+                lastSuccessfulDownload,
+                System.currentTimeMillis(),
+            )
+        ) {
+            radarBaseUpdater.requestUpdate()
+        }
     }
     fun acquireMapKit() = mapKitLifecycle.acquire()
     fun releaseMapKit() = mapKitLifecycle.release()
     fun radarBaseUpdater(): RadarBaseUpdater = radarBaseUpdater
+    fun shouldShowPhoneRadarBaseUpdate(state: RadarBaseUpdateState): Boolean =
+        phoneRadarBaseNotificationGate.shouldShow(state)
     fun routeManager(): RouteManager = routeManager
 
     companion object {
