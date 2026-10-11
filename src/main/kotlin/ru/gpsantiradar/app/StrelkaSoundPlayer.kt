@@ -32,7 +32,12 @@ class StrelkaSoundPlayer(context: Context) {
     private var released = false
 
     @Synchronized
-    fun announce(`object`: CameraPoint, distanceMeters: Int, multipleActiveObjects: Boolean) {
+    fun announce(
+        `object`: CameraPoint,
+        distanceMeters: Int,
+        multipleActiveObjects: Boolean,
+        trailingBeepDistanceMeters: Int? = null,
+    ) {
         if (released) return
         if (!multipleActiveObjects) add("alert.mp3", 1f)
         add(typeClip(`object`.type), 1f)
@@ -50,6 +55,9 @@ class StrelkaSoundPlayer(context: Context) {
         when (`object`.type) {
             41 -> add("average_speed_section_start.mp3", 1f)
             42 -> add("average_speed_section_finish.mp3", 1f)
+        }
+        if (trailingBeepDistanceMeters != null) {
+            add("beep.mp3", StrelkaAlertAlgorithm.beepVolume(trailingBeepDistanceMeters))
         }
         startWorkerIfNeeded()
     }

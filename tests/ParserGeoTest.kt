@@ -526,7 +526,7 @@ check(update!!.pendingVoice != null,
 }
 
 private fun verifyMultiObjectOverspeedSelection() {
-val noLimit = marker(501, 55.75, 37.61, 1)
+val noLimit = marker(501, 55.75, 37.61, 7)
 noLimit.speedRules = ""
 val limited = marker(502, 55.751, 37.611, 1)
 limited.speedRules = SpeedControlRules.encode(60, false,
@@ -539,6 +539,12 @@ check(overspeed != null && overspeed!!.`object`.id == limited.id,
 "a farther limited object requests a beep when the nearest has no limit")
 check(tracker!!.snapshot().activeCameraIds.contentEquals(longArrayOf(noLimit.id, limited.id)),
 "all confirmed active object ids are exported in nearest-first order")
+check(tracker!!.snapshot().displayCandidate(90f, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH)
+!!.`object`.id == limited.id,
+"an overspeed camera remains displayed when a nearer road object has no speed limit")
+check(tracker!!.snapshot().displayCandidate(65f, AppSettings.DEFAULT_OVERSPEED_THRESHOLD_KMH)
+!!.`object`.id == noLimit.id,
+"the nearest active object is displayed when there is no overspeed warning")
 
 val lowerId = marker(513, 55.752, 37.612, 1)
 lowerId.speedRules = SpeedControlRules.encode(50, false,
@@ -641,9 +647,9 @@ return StrelkaAlertTracker.Observation(`object`, distance,
 
 private fun verifyKnownReleaseHistory() {
 val releases = ReleaseHistory.entries()
-check(releases!!.size == 22, "about dialog contains every known release")
+check(releases!!.size == 23, "about dialog contains every known release")
 check(releases!!.map { it.version } == listOf(
-"4.9.18", "4.9.17", "4.9.16", "4.9.15", "4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
+"4.9.19", "4.9.18", "4.9.17", "4.9.16", "4.9.15", "4.9.14", "4.9.13", "4.9.12", "4.9.11", "4.9.10", "4.9.9", "4.9.8", "4.9.7",
 "4.9.6", "4.9.5", "4.9.4", "4.9.3", "4.9.2", "4.9.1", "4.9.0",
 "4.8.1", "4.8.0", "4.7.1"),
 "release history is newest first")
@@ -652,20 +658,17 @@ for (release in releases!!)
 check(release!!.changes != null && !release!!.changes.trim().isEmpty(),
 "every release has a visible change description")
 }
-val current = ReleaseHistory.find("4.9.18")
+val current = ReleaseHistory.find("4.9.19")
 check(current != null && !current!!.changes.trim().isEmpty(),
 "current release has a visible change description")
-check((current!!.changes.contains("маршрут")
-&& current!!.changes.contains("Android Auto")),
-"current release describes route support")
-check((current!!.changes.contains("пробок")
-&& current!!.changes.contains("GPS-шума")
-&& current!!.changes.contains("запрет перетаскивания")),
-"current release describes the completed 4.9.18 feature set")
-val previous = ReleaseHistory.find("4.9.17")
-check((previous != null && previous!!.changes.contains("97")
-&& previous!!.changes.contains("звуковых")),
-"previous release keeps its refreshed sound set description")
+check((current!!.changes.contains("пешеходном переходе")
+&& current!!.changes.contains("звуковой сигнал превышения")
+&& current!!.changes.contains("правый верхний угол")),
+"current release describes the completed 4.9.19 feature set")
+val previous = ReleaseHistory.find("4.9.18")
+check((previous != null && previous!!.changes.contains("маршрут")
+&& previous!!.changes.contains("Android Auto")),
+"previous release keeps its route support description")
 check(ReleaseHistory.find("missing") == null,
 "unknown release has no fabricated description")
 }

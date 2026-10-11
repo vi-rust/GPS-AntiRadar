@@ -488,8 +488,8 @@ class MainActivity : Activity() {
         val positionParams = FrameLayout.LayoutParams(
             dp(44),
             dp(44),
-            Gravity.BOTTOM or Gravity.END,
-        ).apply { setMargins(0, 0, dp(6), dp(6)) }
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(110), dp(6), 0) }
         overlay.addView(positionButtonView, positionParams)
 
         trafficButtonView = iconButton(R.drawable.ic_traffic, "Скрыть пробки").apply {
@@ -502,8 +502,8 @@ class MainActivity : Activity() {
         val trafficParams = FrameLayout.LayoutParams(
             dp(44),
             dp(44),
-            Gravity.BOTTOM or Gravity.END,
-        ).apply { setMargins(0, 0, dp(6), dp(58)) }
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(58), dp(6), 0) }
         overlay.addView(trafficButtonView, trafficParams)
         applyTrafficVisibility(isTrafficVisible())
 
@@ -555,7 +555,9 @@ class MainActivity : Activity() {
         val actions = arrayOf(primaryAction, "Добавить объект антирадара")
         val dialog = AlertDialog.Builder(this, dialogTheme())
             .setTitle("Действие с точкой")
-            .setItems(actions) { _, index ->
+            .setAdapter(
+                scaledTextAdapter(actions.toList(), android.R.layout.simple_list_item_1),
+            ) { _, index ->
                 when (index) {
                     0 -> if (removeRoute) routeManager.clearRoute() else buildRouteTo(position)
                     else -> showQuickAddUserObjectDialog(position)
@@ -594,6 +596,7 @@ class MainActivity : Activity() {
         }
         val input = EditText(this).apply {
             hint = "Начните вводить адрес"
+            textSize = scaledSp(18)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
             setSingleLine(true)
             minLines = 1

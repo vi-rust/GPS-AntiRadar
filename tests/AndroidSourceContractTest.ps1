@@ -106,6 +106,8 @@ Assert-Contains $Activity '\u0417\u0430\u043F\u0440\u0435\u0442\u0438\u0442\u044
 Assert-Contains $Activity 'R\.drawable\.ic_traffic' "Phone map must expose the traffic toggle button"
 Assert-Contains $Activity 'putBoolean\(AppSettings\.TRAFFIC_VISIBLE, visible\)' "Traffic choice must be persisted"
 Assert-Contains $Activity 'trafficButtonView\.clearColorFilter\(\)' "Multicolor traffic icon must retain its road-condition colors"
+Assert-Contains $Activity 'val trafficParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(58\), dp\(6\), 0\)' "Traffic button must sit directly below the top-right menu button"
+Assert-Contains $Activity 'val positionParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(110\), dp\(6\), 0\)' "Location button must sit below the top-right traffic button"
 Assert-Contains $Activity 'createTrafficLayer\(view\.mapWindow\)' "Traffic toggle must control the full phone map traffic layer"
 Assert-Contains $Activity 'trafficLayer\?\.takeIf \{ it\.isValid \}\?\.setTrafficVisible\(visible\)' "Phone traffic layer must follow the persisted toggle safely"
 Assert-Contains $CarPresentation 'createTrafficLayer\(mapWindow\)' "Traffic toggle must control the full Android Auto map traffic layer"
@@ -232,6 +234,8 @@ Assert-Contains $Activity 'resources\.displayMetrics\.density \* uiScaleFactor' 
 Assert-Contains $Activity 'textSize = scaledSp\(sp\)' "In-app UI scale must affect application text"
 Assert-Contains $Activity 'private fun scaledTextAdapter\(' "System-backed list controls must share the UI text scale"
 Assert-Contains $Activity 'override fun getView[\s\S]*?override fun getDropDownView[\s\S]*?scaledSp\(textSp\)' "Spinner values and dropdown rows must both use the UI text scale"
+Assert-Contains $Activity 'showRoutePointActionDialog[\s\S]*?scaledTextAdapter\(actions\.toList\(\), android\.R\.layout\.simple_list_item_1\)' "Long-press map actions must use the UI text scale"
+Assert-Contains $Activity 'val input = EditText\(this\)\.apply \{[\s\S]*?textSize = scaledSp\(18\)' "Route address input must use the UI text scale"
 Assert-Contains $Activity 'textSize = scaledSp\(22\)' "Slider step button text must use the UI text scale"
 Assert-Contains $Activity 'BUTTON_NEUTRAL\)\?\.textSize = scaledSp\(14\)' "Every dialog action button must use the UI text scale"
 Assert-Contains $Activity 'messageId\)\?\.textSize = scaledSp\(16\)' "Dialog messages must use the UI text scale"
@@ -314,8 +318,8 @@ Assert-Contains $BuildGradle 'kotlin\.directories\.add\("src/test/kotlin"\)' "Te
 if ($BuildGradle -match 'src/ru') {
     throw "Legacy production source directory must not be configured"
 }
-Assert-Contains $BuildGradle 'versionCode\s*=\s*53' "Release versionCode changed unexpectedly"
-Assert-Contains $BuildGradle 'appVersionName\s*=\s*"4\.9\.18"' "Release versionName changed unexpectedly"
+Assert-Contains $BuildGradle 'versionCode\s*=\s*54' "Release versionCode changed unexpectedly"
+Assert-Contains $BuildGradle 'appVersionName\s*=\s*"4\.9\.19"' "Release versionName changed unexpectedly"
 foreach ($Dependency in @(
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app:1.7.0" },
         [pscustomobject]@{ Configuration = "implementation"; Coordinate = "androidx.car.app:app-projected:1.7.0" },

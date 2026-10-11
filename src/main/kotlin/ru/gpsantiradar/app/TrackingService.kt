@@ -243,17 +243,27 @@ class TrackingService : Service(), LocationListener {
             nearestDistance = tracked.distanceMeters.toDouble()
             nearestAlertDistance = tracked.activationDistance
         }
-        val closestActive = alertUpdate.closestActive
-        if (closestActive != null) {
-            nearest = closestActive.`object`
-            nearestDistance = closestActive.distanceMeters.toDouble()
-            nearestAlertDistance = closestActive.activationDistance
+        val displayCandidate = alertUpdate.displayCandidate(speedKmh, overspeedThresholdKmh)
+        if (displayCandidate != null) {
+            nearest = displayCandidate.`object`
+            nearestDistance = displayCandidate.distanceMeters.toDouble()
+            nearestAlertDistance = displayCandidate.activationDistance
         }
         val proposed = nearest
         val retained = retainedDisplayed
         if (proposed != null && retained != null && proposed.id != retained.id) {
             val proposedIsActive = alertUpdate.activeCameraIds.contains(proposed.id)
             val retainedIsActive = alertUpdate.activeCameraIds.contains(retained.id)
+            val proposedIsOverspeed = proposedIsActive && StrelkaAlertAlgorithm.isOverspeeding(
+                proposed,
+                speedKmh,
+                overspeedThresholdKmh,
+            )
+            val retainedIsOverspeed = retainedIsActive && StrelkaAlertAlgorithm.isOverspeeding(
+                retained,
+                speedKmh,
+                overspeedThresholdKmh,
+            )
             val accuracyMargin = if (trackingLocation.hasAccuracy()) {
                 trackingLocation.accuracy * OBJECT_SWITCH_ACCURACY_FACTOR
             } else {
@@ -261,6 +271,7 @@ class TrackingService : Service(), LocationListener {
             }
             val switchMargin = max(OBJECT_SWITCH_MIN_MARGIN_METERS, accuracyMargin.toDouble())
             val keepRetained = when {
+                retainedIsOverspeed != proposedIsOverspeed -> retainedIsOverspeed
                 retainedIsActive && !proposedIsActive -> true
                 retainedIsActive == proposedIsActive ->
                     nearestDistance + switchMargin >= retainedDisplayedDistance
@@ -323,14 +334,19 @@ class TrackingService : Service(), LocationListener {
         nearestDistance: Double,
         nearestAlertDistance: Int,
     ): String {
+        val overspeed = update.overspeedCandidate(speedKmh, overspeedThresholdKmh)
         val pending = update.pendingVoice
         if (pending != null) {
-            soundPlayer.announce(pending.`object`, pending.distanceMeters, update.activeCount > 1)
+            soundPlayer.announce(
+                pending.`object`,
+                pending.distanceMeters,
+                update.activeCount > 1,
+                overspeed?.distanceMeters,
+            )
             alertTracker.markSpoken(pending.`object`.id)
             return "Вход подтверждён: голос · ${pending.distanceMeters} м"
         }
         val closest = update.closestActive
-        val overspeed = update.overspeedCandidate(speedKmh, overspeedThresholdKmh)
         if (overspeed != null) {
             val signaled = scanPerformed && soundPlayer.beepIfIdle(overspeed.distanceMeters)
             return "В зоне: ${overspeed.distanceMeters} м · превышение +" +
