@@ -117,16 +117,18 @@ Assert-Contains $RadarBaseUpdater '\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u
 Assert-Contains $Activity 'R\.drawable\.ic_traffic' "Phone map must expose the traffic toggle button"
 Assert-Contains $Activity 'putBoolean\(AppSettings\.TRAFFIC_VISIBLE, visible\)' "Traffic choice must be persisted"
 Assert-Contains $Activity 'trafficButtonView\.clearColorFilter\(\)' "Multicolor traffic icon must retain its road-condition colors"
-Assert-Contains $Activity 'val trafficParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(58\), dp\(6\), 0\)' "Traffic button must sit directly below the top-right menu button"
-Assert-Contains $Activity 'val positionParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(162\), dp\(6\), 0\)' "Location button must sit below the top-right 2D/3D button"
+Assert-Contains $Activity 'val trafficParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(110\), dp\(6\), 0\)' "Traffic button must sit below route search"
+Assert-Contains $Activity 'val positionParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(214\), dp\(6\), 0\)' "Location button must sit below route search"
 Assert-Contains $Activity 'mapModeButtonView = Button\(this\)' "Phone map must expose the 2D/3D toggle button"
 Assert-Contains $Activity 'cameraMapLayer\?\.toggleMapDimension\(\)' "The 2D/3D button must control the shared map camera"
-Assert-Contains $Activity 'val mapModeParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(110\), dp\(6\), 0\)' "The 2D/3D button must sit directly above the location button"
-Assert-Contains $Activity 'zoomControlsView\.translationY = view\.height \* 0\.25f' "Zoom controls must sit 25 percent of the screen height above the bottom"
+Assert-Contains $Activity 'val mapModeParams = FrameLayout\.LayoutParams\([\s\S]*?Gravity\.TOP or Gravity\.END,[\s\S]*?setMargins\(0, dp\(162\), dp\(6\), 0\)' "The 2D/3D button must sit below the traffic button"
+if ($Activity -match 'zoomControlsView|zoomInButtonView|zoomOutButtonView') {
+    throw "Phone map zoom buttons must not return"
+}
 Assert-Contains $SharedMapLayer 'fun toggleMapDimension\(\): Boolean\?' "Shared map must support switching between flat and perspective views"
 Assert-Contains $SharedMapLayer 'CameraPosition\(current\.target, current\.zoom, current\.azimuth, nextTilt\)' "2D/3D switching must preserve the current map viewport"
 Assert-Contains $Activity 'routeButtonView = iconButton\(R\.drawable\.ic_route_search' "Phone map must expose address route search"
-Assert-Contains $Activity 'val routeButtonParams = FrameLayout\.LayoutParams\([\s\S]*?setMargins\(0, dp\(214\), dp\(6\), 0\)' "Route search must sit below the location button"
+Assert-Contains $Activity 'val routeButtonParams = FrameLayout\.LayoutParams\([\s\S]*?setMargins\(0, dp\(58\), dp\(6\), 0\)' "Route search must sit directly below the top-right menu button"
 Assert-Contains $Activity 'snapshot\.status == RouteStatus\.READY\)[\s\S]*?showRouteInfoDialog\(\)[\s\S]*?else[\s\S]*?showAddressRouteDialog\(\)' "The active route button must show route information instead of replacing it immediately"
 if ($Activity -match 'override fun onMapTapped') {
     throw "Short map taps must not open route information"
@@ -274,9 +276,7 @@ Assert-Contains $Activity 'messageId\)\?\.textSize = scaledSp\(16\)' "Dialog mes
 Assert-Contains $Activity 'shouldShowPhoneRadarBaseUpdate\(state\)' "Phone must suppress replayed RadarBase notifications"
 Assert-Contains $Activity 'private fun radarBaseToastView\(message: String\): TextView' "RadarBase notifications must use a scalable text view"
 Assert-Contains $Activity 'text\(message, 14, Color\.WHITE, Typeface\.NORMAL\)' "RadarBase notification text must follow the UI scale"
-if (([regex]::Matches($Activity, 'scaleType = ImageView\.ScaleType\.FIT_CENTER')).Count -lt 2) {
-    throw "Main-screen action icons must scale with their button bounds"
-}
+Assert-Contains $Activity 'private fun iconButton\([\s\S]*?scaleType = ImageView\.ScaleType\.FIT_CENTER' "Main-screen action icons must scale with their button bounds"
 Assert-Contains $Activity 'mapWindow\.setScaleFactor\(mapScaleFactor\)' "MapKit rendering must use its independent map scale"
 Assert-Contains $Settings 'DEFAULT_UI_SCALE_PERCENT = 100' "UI scale must default to 100 percent"
 Assert-Contains $Settings 'MIN_UI_SCALE_PERCENT = 100' "UI scale minimum must remain 100 percent"

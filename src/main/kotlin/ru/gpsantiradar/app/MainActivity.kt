@@ -90,12 +90,8 @@ class MainActivity : Activity() {
     private var aboutLastDownloadView: TextView? = null
     private lateinit var screenView: FrameLayout
     private lateinit var hudPanel: LinearLayout
-    private lateinit var zoomControlsView: LinearLayout
     private lateinit var mapOverlay: FrameLayout
-    private lateinit var zoomDividerView: View
     private lateinit var menuButtonView: ImageButton
-    private lateinit var zoomInButtonView: ImageButton
-    private lateinit var zoomOutButtonView: ImageButton
     private lateinit var positionButtonView: ImageButton
     private lateinit var trafficButtonView: ImageButton
     private lateinit var routeButtonView: ImageButton
@@ -464,32 +460,6 @@ class MainActivity : Activity() {
             .apply { setMargins(0, dp(6), dp(6), 0) }
         overlay.addView(menuButtonView, menuParams)
 
-        zoomControlsView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            background = roundedBackground(controlSurfaceColor(), 7)
-            elevation = dp(4).toFloat()
-        }
-        zoomInButtonView = segmentedIconButton(R.drawable.ic_add, "Увеличить карту").apply {
-            setOnClickListener { cameraMapLayer?.zoomBy(1f) }
-        }
-        zoomControlsView.addView(zoomInButtonView, LinearLayout.LayoutParams(dp(44), dp(44)))
-        zoomDividerView = View(this).apply { setBackgroundColor(dividerColor()) }
-        val dividerParams = LinearLayout.LayoutParams(-1, dp(1)).apply {
-            setMargins(dp(7), 0, dp(7), 0)
-        }
-        zoomControlsView.addView(zoomDividerView, dividerParams)
-        zoomOutButtonView = segmentedIconButton(R.drawable.ic_remove, "Уменьшить карту").apply {
-            setOnClickListener { cameraMapLayer?.zoomBy(-1f) }
-        }
-        zoomControlsView.addView(zoomOutButtonView, LinearLayout.LayoutParams(dp(44), dp(44)))
-        val zoomParams = FrameLayout.LayoutParams(dp(44), -2, Gravity.END or Gravity.CENTER_VERTICAL)
-            .apply { setMargins(0, 0, dp(6), 0) }
-        overlay.addView(zoomControlsView, zoomParams)
-        overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            zoomControlsView.translationY = view.height * 0.25f
-        }
-
         positionButtonView = iconButton(R.drawable.ic_my_location, "Моя точка").apply {
             setOnClickListener { centerOnLocation() }
         }
@@ -497,7 +467,7 @@ class MainActivity : Activity() {
             dp(44),
             dp(44),
             Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(162), dp(6), 0) }
+        ).apply { setMargins(0, dp(214), dp(6), 0) }
         overlay.addView(positionButtonView, positionParams)
 
         routeButtonView = iconButton(R.drawable.ic_route_search, "Маршрут по адресу").apply {
@@ -514,7 +484,7 @@ class MainActivity : Activity() {
             dp(44),
             dp(44),
             Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(214), dp(6), 0) }
+        ).apply { setMargins(0, dp(58), dp(6), 0) }
         overlay.addView(routeButtonView, routeButtonParams)
 
         mapModeButtonView = Button(this).apply {
@@ -536,7 +506,7 @@ class MainActivity : Activity() {
             dp(44),
             dp(44),
             Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(110), dp(6), 0) }
+        ).apply { setMargins(0, dp(162), dp(6), 0) }
         overlay.addView(mapModeButtonView, mapModeParams)
 
         trafficButtonView = iconButton(R.drawable.ic_traffic, "Скрыть пробки").apply {
@@ -550,7 +520,7 @@ class MainActivity : Activity() {
             dp(44),
             dp(44),
             Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(58), dp(6), 0) }
+        ).apply { setMargins(0, dp(110), dp(6), 0) }
         overlay.addView(trafficButtonView, trafficParams)
         applyTrafficVisibility(isTrafficVisible())
 
@@ -2078,16 +2048,6 @@ class MainActivity : Activity() {
             elevation = dp(4).toFloat()
         }
 
-    private fun segmentedIconButton(iconResource: Int, description: String): ImageButton =
-        ImageButton(this).apply {
-            setImageResource(iconResource)
-            tintIcon(this)
-            contentDescription = description
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-
     private fun showCameraHint(camera: CameraPoint, point: Point) {
         val view = mapView ?: return
         val screen = view.mapWindow.worldToScreen(point) ?: return
@@ -2161,11 +2121,7 @@ class MainActivity : Activity() {
         mapNoticeView?.setTextColor(secondaryTextColor())
         unitView.setTextColor(secondaryTextColor())
         distanceView.setTextColor(primaryTextColor())
-        zoomControlsView.background = roundedBackground(controlSurfaceColor(), 7)
-        zoomDividerView.setBackgroundColor(dividerColor())
         applyControlTheme(menuButtonView, true)
-        applyControlTheme(zoomInButtonView, false)
-        applyControlTheme(zoomOutButtonView, false)
         applyControlTheme(positionButtonView, true)
         applyControlTheme(trafficButtonView, true)
         applyControlTheme(routeButtonView, true)
